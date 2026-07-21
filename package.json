@@ -1,0 +1,15 @@
+{
+  "name": "mooni-relay",
+  "version": "1.0.0",
+  "description": "เซิร์ฟเวอร์กลางกระจายประกาศให้ทุกเครื่องที่มีแอป Mooni",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

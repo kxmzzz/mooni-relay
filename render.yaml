@@ -1,0 +1,12 @@
+# Render Blueprint — เชื่อม repo นี้แล้ว Render จะตั้งค่าเองทั้งหมด
+services:
+  - type: web
+    name: mooni-relay
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: ADMIN_KEY
+        generateValue: true   # Render จะสุ่มรหัสให้ ดู/คัดลอกได้ในหน้า Environment
