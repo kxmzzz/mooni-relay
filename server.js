@@ -91,8 +91,14 @@ async function checkDiscordMember(accessToken) {
   const m = await r.json();
   const name = m.nick || m.user?.global_name || m.user?.username || 'สมาชิก';
   const uid = m.user?.id || '';
+  // รูปโปรไฟล์: ใช้รูปในเซิร์ฟเวอร์ก่อน ถ้าไม่มีก็รูป global ถ้าไม่มีอีกก็ปล่อยว่าง (แอปโชว์ตัวอักษรแทน)
+  const avatar = m.avatar
+    ? `https://cdn.discordapp.com/guilds/${D.guildId}/users/${uid}/avatars/${m.avatar}.png?size=64`
+    : m.user?.avatar
+    ? `https://cdn.discordapp.com/avatars/${uid}/${m.user.avatar}.png?size=64`
+    : '';
   const hasRole = Array.isArray(m.roles) && m.roles.includes(D.roleId);
-  return hasRole ? { ok: true, name, uid } : { ok: false, reason: 'no_role', name, uid };
+  return hasRole ? { ok: true, name, uid, avatar } : { ok: false, reason: 'no_role', name, uid };
 }
 
 /** จัดการทุก request ที่ขึ้นต้น /auth — คืน true ถ้าจัดการแล้ว */
@@ -155,7 +161,7 @@ async function handleAuth(req, res, url, cors) {
       if (check.ok) {
         const exp = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
         const token = signSession({ uid: check.uid, name: check.name, exp });
-        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, token, exp, at: Date.now() });
+        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, avatar: check.avatar || '', token, exp, at: Date.now() });
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(resultPage(true, `ยินดีต้อนรับ ${check.name}!`, 'ล็อกอินสำเร็จ กลับไปที่แอป Mooni ได้เลย — หน้าต่างนี้ปิดได้'));
       } else {
@@ -180,7 +186,7 @@ async function handleAuth(req, res, url, cors) {
     const rec = authResults.get(pair);
     if (!rec) { json(200, { status: 'unknown' }); return true; }
     if (rec.status === 'ok') {
-      json(200, { status: 'ok', name: rec.name, uid: rec.uid, token: rec.token, exp: rec.exp });
+      json(200, { status: 'ok', name: rec.name, uid: rec.uid, avatar: rec.avatar || '', token: rec.token, exp: rec.exp });
       authResults.delete(pair);   // ใช้ครั้งเดียว
     } else if (rec.status === 'denied') {
       json(200, { status: 'denied', reason: rec.reason, name: rec.name });
