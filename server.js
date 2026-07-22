@@ -609,7 +609,7 @@ const server = http.createServer((req, res) => {
   // เช็คสถานะ (โฮสต์บางที่ใช้ ping ให้ไม่หลับ)
   if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ ok: true, clients: wss.clients.size, authEnabled: AUTH_ENABLED }));
+    return res.end(JSON.stringify({ ok: true, clients: wss.clients.size, authEnabled: AUTH_ENABLED, bot: !!D.botToken, store: STORE_ENABLED }));
   }
 
   // ล็อกอิน Discord / เช็คยศ
