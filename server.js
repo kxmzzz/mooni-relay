@@ -623,6 +623,23 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ ok: true, clients: wss.clients.size, authEnabled: AUTH_ENABLED, bot: !!D.botToken, store: STORE_ENABLED }));
   }
 
+  // ทดสอบ Upstash ตรง ๆ (เขียน+อ่าน) — ไว้ debug ว่าคีย์ถูกไหม (ไม่โชว์ token)
+  if (req.method === 'GET' && url.pathname === '/debug/store') {
+    (async () => {
+      const k = 'mooni:selftest';
+      const w = await upstash(['SET', k, 'v-' + Date.now()]);
+      const r = await upstash(['GET', k]);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        storeEnabled: STORE_ENABLED,
+        urlSet: !!UP.url, tokenSet: !!UP.token,
+        urlHost: UP.url.replace(/^https?:\/\//, '').split('.')[0],
+        writeResult: w, readResult: r,
+      }));
+    })().catch((e) => { try { res.writeHead(500); res.end(String(e.message)); } catch {} });
+    return;
+  }
+
   // ล็อกอิน Discord / เช็คยศ
   if (req.method === 'GET' && url.pathname.startsWith('/auth/')) {
     handleAuth(req, res, url, cors).then((handled) => {
