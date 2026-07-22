@@ -31,6 +31,7 @@ const D = {
   clientSecret: process.env.DISCORD_CLIENT_SECRET || '',
   guildId: process.env.DISCORD_GUILD_ID || '',
   roleId: process.env.DISCORD_ROLE_ID || '',
+  primeRoleId: process.env.DISCORD_PRIME_ROLE_ID || '',   // ยศ Mooni Prime (ปลดล็อก Overlay/Win/Sound)
   invite: process.env.DISCORD_INVITE || '',
 };
 const AUTH_SECRET = process.env.AUTH_SECRET || crypto.randomBytes(24).toString('hex');
@@ -97,8 +98,11 @@ async function checkDiscordMember(accessToken) {
     : m.user?.avatar
     ? `https://cdn.discordapp.com/avatars/${uid}/${m.user.avatar}.png?size=64`
     : '';
-  const hasRole = Array.isArray(m.roles) && m.roles.includes(D.roleId);
-  return hasRole ? { ok: true, name, uid, avatar } : { ok: false, reason: 'no_role', name, uid };
+  const roles = Array.isArray(m.roles) ? m.roles : [];
+  const hasRole = roles.includes(D.roleId);
+  // มียศ Prime ไหม (ถ้าแอดมินไม่ได้ตั้ง PRIME_ROLE_ID ไว้ ให้ถือว่าทุกคนที่ล็อกอินได้ = prime)
+  const prime = D.primeRoleId ? roles.includes(D.primeRoleId) : true;
+  return hasRole ? { ok: true, name, uid, avatar, prime } : { ok: false, reason: 'no_role', name, uid };
 }
 
 /** จัดการทุก request ที่ขึ้นต้น /auth — คืน true ถ้าจัดการแล้ว */
@@ -160,8 +164,8 @@ async function handleAuth(req, res, url, cors) {
 
       if (check.ok) {
         const exp = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
-        const token = signSession({ uid: check.uid, name: check.name, exp });
-        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, avatar: check.avatar || '', token, exp, at: Date.now() });
+        const token = signSession({ uid: check.uid, name: check.name, prime: !!check.prime, exp });
+        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, avatar: check.avatar || '', prime: !!check.prime, token, exp, at: Date.now() });
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(resultPage(true, `ยินดีต้อนรับ ${check.name}!`, 'ล็อกอินสำเร็จ กลับไปที่แอป Mooni ได้เลย — หน้าต่างนี้ปิดได้'));
       } else {
@@ -186,7 +190,7 @@ async function handleAuth(req, res, url, cors) {
     const rec = authResults.get(pair);
     if (!rec) { json(200, { status: 'unknown' }); return true; }
     if (rec.status === 'ok') {
-      json(200, { status: 'ok', name: rec.name, uid: rec.uid, avatar: rec.avatar || '', token: rec.token, exp: rec.exp });
+      json(200, { status: 'ok', name: rec.name, uid: rec.uid, avatar: rec.avatar || '', prime: !!rec.prime, token: rec.token, exp: rec.exp });
       authResults.delete(pair);   // ใช้ครั้งเดียว
     } else if (rec.status === 'denied') {
       json(200, { status: 'denied', reason: rec.reason, name: rec.name });

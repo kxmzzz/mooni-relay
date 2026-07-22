@@ -21,5 +21,7 @@ services:
         sync: false
       - key: DISCORD_ROLE_ID
         sync: false
+      - key: DISCORD_PRIME_ROLE_ID
+        sync: false
       - key: DISCORD_INVITE
         sync: false
