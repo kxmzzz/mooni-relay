@@ -451,10 +451,10 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   .tag.y{color:#57d97e;border-color:#2f6b45}
   .tog{cursor:pointer;user-select:none}
   .exp{font-size:11.5px;color:#ffcf3d}.exp.perm{color:#7ab8ff}.exp.gone{color:#ff5a6a}
-  .setrow{display:flex;gap:4px;align-items:center;margin-top:5px}
-  .setrow input{width:56px;padding:5px}
-  .setrow select{padding:5px}
-  .mini{padding:5px 8px;font-size:11px}
+  .setrow{display:flex;gap:6px;align-items:center;margin-top:6px}
+  .setrow select.dur{min-width:120px;padding:6px 9px;cursor:pointer;border-color:#4a2a3a}
+  .setrow select.dur:hover{border-color:#ff7ab8}
+  .mini{padding:6px 10px;font-size:11px}
   #login{max-width:340px;margin:60px auto;padding:26px;background:#17141b;border:2px solid #3a2030;box-shadow:6px 6px 0 #000}
   #login h1{margin-bottom:14px}
   #login input{width:100%;margin-bottom:10px}
@@ -502,7 +502,6 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     if(h>0)return['เหลือ '+h+' ชม. '+m+' นาที',''];
     return['เหลือ '+m+' นาที',''];
   }
-  const UNIT={sec:1000,min:60000,hour:3600000,day:86400000,month:2592000000,year:31536000000};
   function render(){
     const q=$('search').value.trim().toLowerCase();
     const list=members.filter(m=>!q||m.name.toLowerCase().includes(q));
@@ -515,10 +514,18 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
         '<td><span class="tag tog '+(m.mooni?'y':'')+'" data-role="mooni">'+(m.mooni?'มี ✓':'ไม่มี')+'</span></td>'+
         '<td><span class="tag tog '+(m.prime?'y':'')+'" data-role="prime">'+(m.prime?'มี ✓':'ไม่มี')+'</span></td>'+
         '<td><div class="exp '+ec+'">'+et+'</div>'+
-          '<div class="setrow"><input type="number" min="1" value="30" class="amt"><select class="unit">'+
-          '<option value="min">นาที</option><option value="hour">ชั่วโมง</option><option value="day" selected>วัน</option>'+
-          '<option value="month">เดือน</option><option value="year">ปี</option></select>'+
-          '<button class="btn mini set">ตั้ง</button><button class="btn mini perm">ถาวร</button>'+
+          '<div class="setrow"><select class="dur">'+
+          '<option value="">＋ ตั้งเวลา…</option>'+
+          '<option value="300000">5 นาที</option>'+
+          '<option value="3600000">1 ชั่วโมง</option>'+
+          '<option value="86400000">1 วัน</option>'+
+          '<option value="604800000">7 วัน</option>'+
+          '<option value="2592000000">30 วัน</option>'+
+          '<option value="7776000000">90 วัน</option>'+
+          '<option value="15552000000">6 เดือน</option>'+
+          '<option value="31536000000">1 ปี</option>'+
+          '<option value="perm">♾ ถาวร</option>'+
+          '</select>'+
           '<button class="btn mini gone">หมดอายุ</button></div></td></tr>';
     }).join('');
   }
@@ -534,12 +541,16 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
       if(e.target.classList.contains('tog')){
         const role=e.target.dataset.role,on=!e.target.classList.contains('y');
         e.target.textContent='...';await call('/panel/role',{uid,role,on});await load();
-      }else if(e.target.classList.contains('set')){
-        const amt=+tr.querySelector('.amt').value||0,unit=tr.querySelector('.unit').value;
-        if(amt<=0)return;await call('/panel/expiry',{uid,exp:Date.now()+amt*UNIT[unit]});await load();
-      }else if(e.target.classList.contains('perm')){await call('/panel/expiry',{uid,exp:0});await load();}
-      else if(e.target.classList.contains('gone')){await call('/panel/expiry',{uid,exp:Date.now()-1000});await load();}
+      }else if(e.target.classList.contains('gone')){await call('/panel/expiry',{uid,exp:Date.now()-1000});await load();}
     }catch(err){$('pmsg').textContent=err.message;}
+  });
+  // เลือกเวลาจากดรอปดาวน์เดียว แล้วตั้งเลยทันที
+  $('rows').addEventListener('change',async e=>{
+    if(!e.target.classList.contains('dur'))return;
+    const tr=e.target.closest('tr');const uid=tr.dataset.uid,v=e.target.value;
+    if(!v)return;
+    try{await call('/panel/expiry',{uid,exp:v==='perm'?0:Date.now()+Number(v)});await load();}
+    catch(err){$('pmsg').textContent=err.message;e.target.value='';}
   });
   $('search').addEventListener('input',render);
   $('refresh').addEventListener('click',load);
