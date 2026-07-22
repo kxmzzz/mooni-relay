@@ -10,3 +10,16 @@ services:
     envVars:
       - key: ADMIN_KEY
         generateValue: true   # Render จะสุ่มรหัสให้ ดู/คัดลอกได้ในหน้า Environment
+      - key: AUTH_SECRET
+        generateValue: true   # คีย์เซ็นบัตรผ่าน Discord (Render สุ่มให้)
+      # ---- ล็อกอิน Discord (ยศ Mooni) — ใส่ค่าเองในหน้า Environment ----
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DISCORD_GUILD_ID
+        sync: false
+      - key: DISCORD_ROLE_ID
+        sync: false
+      - key: DISCORD_INVITE
+        sync: false
