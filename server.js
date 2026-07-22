@@ -32,6 +32,7 @@ const D = {
   guildId: process.env.DISCORD_GUILD_ID || '',
   roleId: process.env.DISCORD_ROLE_ID || '',
   primeRoleId: process.env.DISCORD_PRIME_ROLE_ID || '',   // ยศ Mooni Prime (ปลดล็อก Overlay/Win/Sound)
+  botToken: process.env.DISCORD_BOT_TOKEN || '',          // โทเคนบอท — ใช้เช็คยศสดแบบเรียลไทม์ (ถอดยศแล้วรู้ทันที)
   invite: process.env.DISCORD_INVITE || '',
 };
 const AUTH_SECRET = process.env.AUTH_SECRET || crypto.randomBytes(24).toString('hex');
@@ -103,6 +104,25 @@ async function checkDiscordMember(accessToken) {
   // มียศ Prime ไหม (ถ้าแอดมินไม่ได้ตั้ง PRIME_ROLE_ID ไว้ ให้ถือว่าทุกคนที่ล็อกอินได้ = prime)
   const prime = D.primeRoleId ? roles.includes(D.primeRoleId) : true;
   return hasRole ? { ok: true, name, uid, avatar, prime } : { ok: false, reason: 'no_role', name, uid };
+}
+
+/** ใช้บอทเช็คยศปัจจุบันของสมาชิก (เรียลไทม์ — ถอดยศแล้วรู้เลย) */
+async function botCheckMember(uid) {
+  try {
+    const r = await fetch(`https://discord.com/api/guilds/${D.guildId}/members/${uid}`, {
+      headers: { Authorization: `Bot ${D.botToken}` },
+    });
+    if (r.status === 404) return { inGuild: false, mooni: false, prime: false };   // ออกจากเซิร์ฟเวอร์แล้ว
+    if (!r.ok) return { error: true };
+    const m = await r.json();
+    const roles = Array.isArray(m.roles) ? m.roles : [];
+    return {
+      inGuild: true,
+      mooni: roles.includes(D.roleId),
+      prime: D.primeRoleId ? roles.includes(D.primeRoleId) : true,
+      name: m.nick || m.user?.global_name || m.user?.username || '',
+    };
+  } catch { return { error: true }; }
 }
 
 /** จัดการทุก request ที่ขึ้นต้น /auth — คืน true ถ้าจัดการแล้ว */
@@ -181,6 +201,20 @@ async function handleAuth(req, res, url, cors) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(resultPage(false, 'ล็อกอินไม่สำเร็จ', 'มีข้อผิดพลาดระหว่างเชื่อม Discord ลองใหม่อีกครั้ง'));
     }
+    return true;
+  }
+
+  // เช็คยศสดแบบเรียลไทม์ (แอปเรียกซ้ำเรื่อย ๆ) — ถอดยศแล้วรู้ทันที
+  if (url.pathname === '/auth/recheck') {
+    const uid = url.searchParams.get('uid') || '';
+    const token = url.searchParams.get('token') || '';
+    const payload = verifySession(token);
+    if (!payload || payload.uid !== uid) { json(200, { valid: false, reason: 'expired' }); return true; }
+    // ไม่ได้ตั้งบอท => เช็คสดไม่ได้ ใช้ค่าจากบัตรผ่านไปก่อน (ไม่เตะใครออก)
+    if (!D.botToken) { json(200, { valid: true, prime: !!payload.prime, live: false }); return true; }
+    const chk = await botCheckMember(uid);
+    if (chk.error) { json(200, { valid: true, prime: !!payload.prime, live: false }); return true; }   // Discord ล่ม อย่าเพิ่งเตะออก
+    json(200, { valid: !!chk.mooni, prime: !!chk.prime, name: chk.name, live: true });
     return true;
   }
 
