@@ -36,6 +36,14 @@ const D = {
   publicKey: process.env.DISCORD_PUBLIC_KEY || '',        // Public Key ของแอป — ใช้ตรวจลายเซ็นปุ่มกดจาก Discord
   invite: process.env.DISCORD_INVITE || '',
 };
+/* บอทตัวที่สอง "☁️Muffin" — ระบบ ticket (ถ้าไม่ตั้ง จะใช้บอท Mooni ตัวเดิมแทน) */
+const M = {
+  botToken: process.env.MUFFIN_BOT_TOKEN || '',
+  publicKey: process.env.MUFFIN_PUBLIC_KEY || '',
+};
+const muffinToken = () => M.botToken || D.botToken;
+const muffinKey = () => M.publicKey || D.publicKey;
+
 const AUTH_SECRET = process.env.AUTH_SECRET || crypto.randomBytes(24).toString('hex');
 const SESSION_DAYS = 3;   // บัตรผ่านหมดอายุแล้วต้องล็อกอินใหม่ (เช็คยศซ้ำ) ทุกกี่วัน
 const AUTH_ENABLED = !!(D.clientId && D.clientSecret && D.guildId && D.roleId);
@@ -137,11 +145,11 @@ async function botListMembers() {
  * ตรวจลายเซ็น Ed25519 ที่ Discord ส่งมา — ถ้าไม่ตรงแปลว่าไม่ได้มาจาก Discord จริง
  * ใช้ crypto ในตัว Node ไม่ต้องลงไลบรารีเพิ่ม (ใส่ DER prefix ให้เป็น SPKI)
  */
-function verifyDiscordSig(signature, timestamp, rawBody) {
-  if (!D.publicKey || !signature || !timestamp) return false;
+function verifyDiscordSig(signature, timestamp, rawBody, pubKey) {
+  if (!pubKey || !signature || !timestamp) return false;
   try {
     const key = crypto.createPublicKey({
-      key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(D.publicKey, 'hex')]),
+      key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(pubKey, 'hex')]),
       format: 'der',
       type: 'spki',
     });
@@ -198,6 +206,127 @@ async function botPostRoleButton({ channelId, text, imageUrl, imageData, imageNa
   let detail = '';
   try { detail = (await r.json())?.message || ''; } catch {}
   return { ok: false, status: r.status, detail };
+}
+
+/* ---------- ระบบ Ticket (บอท ☁️Muffin) ---------- */
+
+const hdr = (token) => ({ Authorization: `Bot ${token}`, 'Content-Type': 'application/json' });
+
+// สิทธิ์: VIEW_CHANNEL(1024) + SEND_MESSAGES(2048) + READ_MESSAGE_HISTORY(65536) + ATTACH_FILES(32768)
+const TICKET_ALLOW = String(1024 + 2048 + 65536 + 32768);
+const VIEW_ONLY = '1024';
+
+/** แก้ข้อความตอบกลับที่ค้างไว้ (หลังตอบ deferred) — ใช้ interaction token ไม่ต้องใช้โทเคนบอท */
+async function editOriginal(appId, itoken, content) {
+  try {
+    await fetch(`https://discord.com/api/v10/webhooks/${appId}/${itoken}/messages/@original`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }),
+    });
+  } catch { /* ตอบไม่ได้ก็ปล่อย */ }
+}
+
+/** โพสต์ข้อความ + ปุ่มเปิด ticket ลงห้องแผงควบคุม */
+async function postTicketPanel({ channelId, text, imageData, imageName, imageUrl, buttonLabel, staffRoleId, categoryId }) {
+  const token = muffinToken();
+  const embed = { color: 0x8ec9ff };
+  if (text) embed.description = String(text).slice(0, 4000);
+
+  let fileBuf = null, fname = null;
+  if (imageData) {
+    fname = String(imageName || 'image.png').replace(/[^\w.\-]/g, '_');
+    fileBuf = Buffer.from(imageData, 'base64');
+    embed.image = { url: `attachment://${fname}` };
+  } else if (imageUrl) embed.image = { url: String(imageUrl) };
+
+  const payload = {
+    embeds: [embed],
+    components: [{
+      type: 1,
+      components: [{
+        type: 2, style: 1,
+        label: String(buttonLabel || '🎫 เปิด Ticket').slice(0, 80),
+        custom_id: `tk:o:${staffRoleId}:${categoryId}`,
+      }],
+    }],
+  };
+
+  let r;
+  if (fileBuf) {
+    const fd = new FormData();
+    fd.append('payload_json', JSON.stringify(payload));
+    fd.append('files[0]', new Blob([fileBuf]), fname);
+    r = await fetch(dcApi(`/channels/${channelId}/messages`), {
+      method: 'POST', headers: { Authorization: `Bot ${token}` }, body: fd,
+    });
+  } else {
+    r = await fetch(dcApi(`/channels/${channelId}/messages`), {
+      method: 'POST', headers: hdr(token), body: JSON.stringify(payload),
+    });
+  }
+  if (r.ok) return { ok: true };
+  let detail = ''; try { detail = (await r.json())?.message || ''; } catch {}
+  return { ok: false, status: r.status, detail };
+}
+
+/** สร้างห้อง ticket ให้คนที่กดปุ่ม (ทำหลังตอบ deferred แล้ว) */
+async function createTicket(body, staffRoleId, categoryId) {
+  const token = muffinToken();
+  const appId = body.application_id, itoken = body.token;
+  const guildId = body.guild_id || D.guildId;
+  const user = body.member?.user;
+  const uid = user?.id;
+  if (!uid) return editOriginal(appId, itoken, 'อ่านข้อมูลผู้ใช้ไม่ได้');
+
+  const uname = String(user.username || 'user').toLowerCase().replace(/[^a-z0-9\-]/g, '').slice(0, 20) || 'user';
+
+  // กันเปิดซ้ำ — หาห้องเดิมในหมวดนี้ที่ topic มีไอดีเขา
+  try {
+    const chs = await fetch(dcApi(`/guilds/${guildId}/channels`), { headers: hdr(token) }).then((r) => r.json());
+    const dup = Array.isArray(chs) && chs.find((c) => c.parent_id === categoryId && String(c.topic || '').includes(`ticket:${uid}`));
+    if (dup) return editOriginal(appId, itoken, `คุณมีห้องที่เปิดอยู่แล้ว → <#${dup.id}>`);
+  } catch { /* หาไม่ได้ก็สร้างใหม่ไปเลย */ }
+
+  const res = await fetch(dcApi(`/guilds/${guildId}/channels`), {
+    method: 'POST', headers: hdr(token),
+    body: JSON.stringify({
+      name: `ticket-${uname}`,
+      type: 0,
+      parent_id: categoryId,
+      topic: `ticket:${uid}`,
+      permission_overwrites: [
+        { id: guildId, type: 0, deny: VIEW_ONLY },            // ทุกคนมองไม่เห็น
+        { id: uid, type: 1, allow: TICKET_ALLOW },            // คนเปิด
+        { id: staffRoleId, type: 0, allow: TICKET_ALLOW },    // ทีมงาน
+      ],
+    }),
+  });
+
+  const ch = await res.json().catch(() => ({}));
+  if (!ch?.id) {
+    return editOriginal(appId, itoken,
+      `เปิดห้องไม่สำเร็จ (${res.status}) ${ch?.message || ''} — เช็คสิทธิ์บอท Manage Channels/Manage Roles และไอดีหมวดหมู่`);
+  }
+
+  // ข้อความต้อนรับ + ปุ่มสำหรับทีมงาน
+  await fetch(dcApi(`/channels/${ch.id}/messages`), {
+    method: 'POST', headers: hdr(token),
+    body: JSON.stringify({
+      content: `<@${uid}> <@&${staffRoleId}>`,
+      embeds: [{
+        color: 0x8ec9ff,
+        description: '📩 เปิด Ticket เรียบร้อย — พิมพ์เรื่องที่ต้องการได้เลย รอทีมงานสักครู่นะ\n\n*ปุ่มด้านล่างใช้ได้เฉพาะทีมงานเท่านั้น*',
+      }],
+      components: [{
+        type: 1,
+        components: [
+          { type: 2, style: 3, label: '✅ สำเร็จ', custom_id: `tk:d:${staffRoleId}` },
+          { type: 2, style: 4, label: '🔒 ปิดห้อง', custom_id: `tk:c:${staffRoleId}` },
+        ],
+      }],
+    }),
+  }).catch(() => {});
+
+  return editOriginal(appId, itoken, `เปิดห้องให้แล้ว → <#${ch.id}>`);
 }
 
 // ใครกำลังใช้แอปอยู่ (แอปยิง /auth/recheck ทุก 30 วิ) uid -> เวลาเห็นล่าสุด
@@ -575,6 +704,25 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     </div>
   </details>
 
+  <details class="rb">
+    <summary>🎫 ส่งปุ่มเปิด Ticket (บอท ☁️Muffin)</summary>
+    <div class="rb-body">
+      <div class="rb-row">
+        <label>ไอดีห้องที่จะวางปุ่ม<input id="tkChannel" value="1484627407695511582"></label>
+        <label>ไอดียศทีมงาน (กดปิด/สำเร็จได้)<input id="tkRole" value="1484626578943246518"></label>
+      </div>
+      <label>ไอดีหมวดหมู่ที่จะสร้างห้อง<input id="tkCat" value="1530270907116028086"></label>
+      <label>ข้อความด้านบน<textarea id="tkText" rows="3" placeholder="เช่น มีปัญหาหรือต้องการติดต่อทีมงาน กดปุ่มด้านล่างได้เลย 🎫"></textarea></label>
+      <div class="rb-row">
+        <label>อัปโหลดรูปจากเครื่อง<input id="tkFile" type="file" accept="image/*"></label>
+        <label>หรือใส่ลิงก์รูป<input id="tkImage" placeholder="https://..."></label>
+        <label style="max-width:150px">ชื่อปุ่ม<input id="tkLabel" value="🎫 เปิด Ticket"></label>
+      </div>
+      <button class="btn pink" id="tkSend">ส่งเข้าห้อง Discord</button>
+      <div class="msg" id="tkMsg"></div>
+    </div>
+  </details>
+
   <table><thead><tr>
     <th>สมาชิก</th><th>Mooni</th><th>Prime</th><th>หมดอายุ</th>
   </tr></thead><tbody id="rows"></tbody></table>
@@ -649,6 +797,26 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     try{await call('/panel/expiry',{uid,exp:v==='perm'?0:Date.now()+Number(v)});await load();}
     catch(err){$('pmsg').textContent=err.message;e.target.value='';}
   });
+  // อ่านไฟล์รูปเป็น base64 (ใช้ร่วมกันทั้ง 2 ฟอร์ม)
+  async function readImg(input){
+    const f=input.files[0]; if(!f)return{};
+    if(f.size>8*1024*1024)throw new Error('รูปใหญ่เกิน 8MB');
+    const imageData=await new Promise((res,rej)=>{const fr=new FileReader();
+      fr.onload=()=>res(String(fr.result).split(',')[1]);fr.onerror=()=>rej(new Error('อ่านไฟล์ไม่ได้'));
+      fr.readAsDataURL(f);});
+    return {imageData,imageName:f.name};
+  }
+  $('tkSend').addEventListener('click',async()=>{
+    const b=$('tkSend');b.disabled=true;$('tkMsg').style.color='#b58aa0';$('tkMsg').textContent='กำลังส่ง…';
+    try{
+      const img=await readImg($('tkFile'));
+      await call('/panel/ticketpanel',{channelId:$('tkChannel').value.trim(),staffRoleId:$('tkRole').value.trim(),
+        categoryId:$('tkCat').value.trim(),text:$('tkText').value,imageUrl:$('tkImage').value.trim(),
+        ...img,buttonLabel:$('tkLabel').value.trim()});
+      $('tkMsg').style.color='#57d97e';$('tkMsg').textContent='✅ ส่งเข้าห้องแล้ว';
+    }catch(e){$('tkMsg').style.color='#ff5a6a';$('tkMsg').textContent=e.message;}
+    finally{b.disabled=false;}
+  });
   $('search').addEventListener('input',render);
   $('refresh').addEventListener('click',load);
   $('rbSend').addEventListener('click',async()=>{
@@ -693,12 +861,12 @@ function readRaw(req) {
  * Discord ยิงมาที่นี่ตอนมีคนกดปุ่ม (ตั้ง Interactions Endpoint URL ในหน้า Developer Portal)
  * ตอบกลับต้องไม่เกิน 3 วินาที
  */
-async function handleInteraction(req, res) {
+async function handleInteraction(req, res, pubKey) {
   const raw = await readRaw(req);
   const sig = req.headers['x-signature-ed25519'];
   const ts = req.headers['x-signature-timestamp'];
 
-  if (!verifyDiscordSig(sig, ts, raw)) {
+  if (!verifyDiscordSig(sig, ts, raw, pubKey)) {
     res.writeHead(401); return res.end('invalid request signature');
   }
 
@@ -711,6 +879,43 @@ async function handleInteraction(req, res) {
 
   if (body.type === 3) {                                   // กดปุ่ม
     const customId = body.data?.custom_id || '';
+
+    /* ---- ระบบ Ticket ---- */
+    if (customId.startsWith('tk:o:')) {                     // เปิด ticket
+      const [, , staffRoleId, categoryId] = customId.split(':');
+      json({ type: 5, data: { flags: 64 } });               // ตอบ deferred ก่อน กันเกิน 3 วิ
+      createTicket(body, staffRoleId, categoryId).catch(() => {});
+      return;
+    }
+
+    if (customId.startsWith('tk:d:') || customId.startsWith('tk:c:')) {
+      const staffRoleId = customId.split(':')[2];
+      const roles = body.member?.roles || [];
+      // คนเปิดห้อง (ไม่มียศทีมงาน) กดไม่ได้
+      if (!roles.includes(staffRoleId)) return reply('❌ ปุ่มนี้ใช้ได้เฉพาะทีมงานเท่านั้น');
+
+      const token = muffinToken();
+      const chId = body.channel_id;
+
+      if (customId.startsWith('tk:d:')) {                   // ✅ สำเร็จ
+        const cur = body.channel?.name || '';
+        if (cur && !cur.startsWith('✅')) {
+          fetch(dcApi(`/channels/${chId}`), {
+            method: 'PATCH', headers: hdr(token),
+            body: JSON.stringify({ name: `✅-${cur}`.slice(0, 95) }),
+          }).catch(() => {});
+        }
+        return json({ type: 4, data: { content: `✅ <@${body.member?.user?.id}> ทำเครื่องหมายว่า **สำเร็จ** แล้ว` } });
+      }
+
+      // 🔒 ปิดห้อง — ตอบก่อนแล้วค่อยลบ
+      json({ type: 4, data: { content: '🔒 กำลังปิดห้องนี้ใน 3 วินาที…' } });
+      setTimeout(() => {
+        fetch(dcApi(`/channels/${chId}`), { method: 'DELETE', headers: hdr(token) }).catch(() => {});
+      }, 3000);
+      return;
+    }
+
     if (!customId.startsWith('role:')) return reply('ปุ่มนี้ใช้ไม่ได้แล้ว');
 
     const roleId = customId.slice(5);
@@ -779,6 +984,24 @@ async function handlePanel(pathname, data) {
       : { code: 500, body: { error: `ส่งไม่สำเร็จ (${out.status}) ${out.detail || 'เช็คว่าบอทเห็นห้องนี้และมีสิทธิ์ส่งข้อความ'}` } };
   }
 
+  if (pathname === '/panel/ticketpanel') {
+    const channelId = String(data.channelId || '').trim();
+    const staffRoleId = String(data.staffRoleId || '').trim();
+    const categoryId = String(data.categoryId || '').trim();
+    for (const [v, label] of [[channelId, 'ห้อง'], [staffRoleId, 'ยศทีมงาน'], [categoryId, 'หมวดหมู่']]) {
+      if (!/^\d{5,}$/.test(v)) return { code: 400, body: { error: `ไอดี${label}ไม่ถูกต้อง` } };
+    }
+    const out = await postTicketPanel({
+      channelId, staffRoleId, categoryId,
+      text: data.text, imageUrl: data.imageUrl,
+      imageData: data.imageData, imageName: data.imageName,
+      buttonLabel: data.buttonLabel,
+    });
+    return out.ok
+      ? { code: 200, body: { ok: true } }
+      : { code: 500, body: { error: `ส่งไม่สำเร็จ (${out.status}) ${out.detail || 'เช็คว่าบอทเห็นห้องนี้และมีสิทธิ์ส่งข้อความ'}` } };
+  }
+
   if (pathname === '/panel/expiry') {
     if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
     const exp = Number(data.exp) || 0;
@@ -835,8 +1058,13 @@ const server = http.createServer((req, res) => {
   }
 
   // Discord ยิงมาตอนมีคนกดปุ่ม (Interactions Endpoint)
+  // /discord/interactions = บอท Mooni (ปุ่มรับยศ) · /discord/muffin = บอท ☁️Muffin (ticket)
   if (req.method === 'POST' && url.pathname === '/discord/interactions') {
-    handleInteraction(req, res).catch(() => { try { res.writeHead(500); res.end('error'); } catch {} });
+    handleInteraction(req, res, D.publicKey).catch(() => { try { res.writeHead(500); res.end('error'); } catch {} });
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/discord/muffin') {
+    handleInteraction(req, res, muffinKey()).catch(() => { try { res.writeHead(500); res.end('error'); } catch {} });
     return;
   }
 
