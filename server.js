@@ -212,6 +212,22 @@ async function botPostRoleButton({ channelId, text, imageUrl, imageData, imageNa
 
 const hdr = (token) => ({ Authorization: `Bot ${token}`, 'Content-Type': 'application/json' });
 
+/**
+ * ยศทีมงานเพิ่มเติมจาก env (คั่นด้วยจุลภาค) — ใช้ได้กับ "ปุ่มที่ส่งไปแล้ว" ด้วย
+ * เช่น TICKET_STAFF_ROLES=1484626455928373279,1484626578943246518
+ */
+const TICKET_STAFF_EXTRA = String(process.env.TICKET_STAFF_ROLES || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
+/** รวมยศทีมงานทั้งจากปุ่มและจาก env */
+const staffRoleSet = (fromButton) => new Set([...(fromButton || []), ...TICKET_STAFF_EXTRA]);
+
+/** คนกดมียศทีมงานไหม */
+function isTicketStaff(memberRoles, fromButton) {
+  const allowed = staffRoleSet(fromButton);
+  return (memberRoles || []).some((r) => allowed.has(r));
+}
+
 // สิทธิ์: VIEW_CHANNEL(1024) + SEND_MESSAGES(2048) + READ_MESSAGE_HISTORY(65536) + ATTACH_FILES(32768)
 const TICKET_ALLOW = String(1024 + 2048 + 65536 + 32768);
 const VIEW_ONLY = '1024';
@@ -269,7 +285,8 @@ async function postTicketPanel({ channelId, text, imageData, imageName, imageUrl
 }
 
 /** สร้างห้อง ticket ให้คนที่กดปุ่ม (ทำหลังตอบ deferred แล้ว) */
-async function createTicket(body, staffRoleId, categoryId) {
+async function createTicket(body, staffRoleIds, categoryId) {
+  const staffIds = [...staffRoleSet(String(staffRoleIds || '').split(',').filter(Boolean))];
   const token = muffinToken();
   const appId = body.application_id, itoken = body.token;
   const guildId = body.guild_id || D.guildId;
@@ -294,9 +311,9 @@ async function createTicket(body, staffRoleId, categoryId) {
       parent_id: categoryId,
       topic: `ticket:${uid}`,
       permission_overwrites: [
-        { id: guildId, type: 0, deny: VIEW_ONLY },            // ทุกคนมองไม่เห็น
-        { id: uid, type: 1, allow: TICKET_ALLOW },            // คนเปิด
-        { id: staffRoleId, type: 0, allow: TICKET_ALLOW },    // ทีมงาน
+        { id: guildId, type: 0, deny: VIEW_ONLY },                                  // ทุกคนมองไม่เห็น
+        { id: uid, type: 1, allow: TICKET_ALLOW },                                  // คนเปิด
+        ...staffIds.map((rid) => ({ id: rid, type: 0, allow: TICKET_ALLOW })),      // ทีมงานทุกยศ
       ],
     }),
   });
@@ -311,7 +328,7 @@ async function createTicket(body, staffRoleId, categoryId) {
   await fetch(dcApi(`/channels/${ch.id}/messages`), {
     method: 'POST', headers: hdr(token),
     body: JSON.stringify({
-      content: `<@${uid}> <@&${staffRoleId}>`,
+      content: `<@${uid}> ${staffIds.map((r) => `<@&${r}>`).join(' ')}`,
       embeds: [{
         color: 0x8ec9ff,
         description: '📩 เปิด Ticket เรียบร้อย — พิมพ์เรื่องที่ต้องการได้เลย รอทีมงานสักครู่นะ\n\n*ปุ่มด้านล่างใช้ได้เฉพาะทีมงานเท่านั้น*',
@@ -319,8 +336,9 @@ async function createTicket(body, staffRoleId, categoryId) {
       components: [{
         type: 1,
         components: [
-          { type: 2, style: 3, label: '✅ สำเร็จ', custom_id: `tk:d:${staffRoleId}` },
-          { type: 2, style: 4, label: '🔒 ปิดห้อง', custom_id: `tk:c:${staffRoleId}` },
+          // custom_id ยาวได้ไม่เกิน 100 ตัว — ใส่แค่ 3 ยศแรก ที่เหลือ env ครอบคลุมอยู่แล้ว
+          { type: 2, style: 3, label: '✅ สำเร็จ', custom_id: `tk:d:${staffIds.slice(0, 3).join(',')}` },
+          { type: 2, style: 4, label: '🔒 ปิดห้อง', custom_id: `tk:c:${staffIds.slice(0, 3).join(',')}` },
         ],
       }],
     }),
@@ -709,7 +727,7 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     <div class="rb-body">
       <div class="rb-row">
         <label>ไอดีห้องที่จะวางปุ่ม<input id="tkChannel" value="1484627407695511582"></label>
-        <label>ไอดียศทีมงาน (กดปิด/สำเร็จได้)<input id="tkRole" value="1484626578943246518"></label>
+        <label>ไอดียศทีมงาน — หลายยศคั่นด้วย , <input id="tkRole" value="1484626455928373279,1484626578943246518"></label>
       </div>
       <label>ไอดีหมวดหมู่ที่จะสร้างห้อง<input id="tkCat" value="1530270907116028086"></label>
       <label>ข้อความด้านบน<textarea id="tkText" rows="3" placeholder="เช่น มีปัญหาหรือต้องการติดต่อทีมงาน กดปุ่มด้านล่างได้เลย 🎫"></textarea></label>
@@ -889,10 +907,10 @@ async function handleInteraction(req, res, pubKey) {
     }
 
     if (customId.startsWith('tk:d:') || customId.startsWith('tk:c:')) {
-      const staffRoleId = customId.split(':')[2];
+      const staffIds = String(customId.split(':')[2] || '').split(',').filter(Boolean);
       const roles = body.member?.roles || [];
       // คนเปิดห้อง (ไม่มียศทีมงาน) กดไม่ได้
-      if (!roles.includes(staffRoleId)) return reply('❌ ปุ่มนี้ใช้ได้เฉพาะทีมงานเท่านั้น');
+      if (!isTicketStaff(roles, staffIds)) return reply('❌ ปุ่มนี้ใช้ได้เฉพาะทีมงานเท่านั้น');
 
       const token = muffinToken();
       const chId = body.channel_id;
@@ -986,10 +1004,13 @@ async function handlePanel(pathname, data) {
 
   if (pathname === '/panel/ticketpanel') {
     const channelId = String(data.channelId || '').trim();
-    const staffRoleId = String(data.staffRoleId || '').trim();
+    // ยศทีมงานใส่ได้หลายอัน คั่นด้วยจุลภาค
+    const staffRoleId = String(data.staffRoleId || '').split(',').map((s) => s.trim()).filter(Boolean).join(',');
     const categoryId = String(data.categoryId || '').trim();
-    for (const [v, label] of [[channelId, 'ห้อง'], [staffRoleId, 'ยศทีมงาน'], [categoryId, 'หมวดหมู่']]) {
-      if (!/^\d{5,}$/.test(v)) return { code: 400, body: { error: `ไอดี${label}ไม่ถูกต้อง` } };
+    if (!/^\d{5,}$/.test(channelId)) return { code: 400, body: { error: 'ไอดีห้องไม่ถูกต้อง' } };
+    if (!/^\d{5,}$/.test(categoryId)) return { code: 400, body: { error: 'ไอดีหมวดหมู่ไม่ถูกต้อง' } };
+    if (!staffRoleId || !staffRoleId.split(',').every((r) => /^\d{5,}$/.test(r))) {
+      return { code: 400, body: { error: 'ไอดียศทีมงานไม่ถูกต้อง (หลายยศคั่นด้วย ,)' } };
     }
     const out = await postTicketPanel({
       channelId, staffRoleId, categoryId,
