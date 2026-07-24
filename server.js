@@ -802,7 +802,11 @@ const server = http.createServer((req, res) => {
   // เช็คสถานะ (โฮสต์บางที่ใช้ ping ให้ไม่หลับ)
   if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ ok: true, clients: wss.clients.size, authEnabled: AUTH_ENABLED, bot: !!D.botToken, store: STORE_ENABLED }));
+    return res.end(JSON.stringify({
+      ok: true, clients: wss.clients.size, authEnabled: AUTH_ENABLED,
+      bot: !!D.botToken, store: STORE_ENABLED,
+      publicKey: !!D.publicKey, publicKeyLen: D.publicKey.length,
+    }));
   }
 
   // ทดสอบ Upstash ตรง ๆ (เขียน+อ่าน) — ไว้ debug ว่าคีย์ถูกไหม (ไม่โชว์ token)
