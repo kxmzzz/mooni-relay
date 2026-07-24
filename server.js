@@ -1029,6 +1029,7 @@ const server = http.createServer((req, res) => {
       ok: true, clients: wss.clients.size, authEnabled: AUTH_ENABLED,
       bot: !!D.botToken, store: STORE_ENABLED,
       publicKey: !!D.publicKey, publicKeyLen: D.publicKey.length,
+      muffinToken: !!M.botToken, muffinKey: !!M.publicKey, muffinKeyLen: M.publicKey.length,
     }));
   }
 
