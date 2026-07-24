@@ -25,6 +25,8 @@ services:
         sync: false
       - key: DISCORD_BOT_TOKEN
         sync: false
+      - key: DISCORD_PUBLIC_KEY
+        sync: false
       # ---- เก็บวันหมดอายุถาวร (Upstash Redis ฟรี) ----
       - key: UPSTASH_REDIS_REST_URL
         sync: false

@@ -33,6 +33,7 @@ const D = {
   roleId: process.env.DISCORD_ROLE_ID || '',
   primeRoleId: process.env.DISCORD_PRIME_ROLE_ID || '',   // ยศ Mooni Prime (ปลดล็อก Overlay/Win/Sound)
   botToken: process.env.DISCORD_BOT_TOKEN || '',          // โทเคนบอท — ใช้เช็คยศสดแบบเรียลไทม์ (ถอดยศแล้วรู้ทันที)
+  publicKey: process.env.DISCORD_PUBLIC_KEY || '',        // Public Key ของแอป — ใช้ตรวจลายเซ็นปุ่มกดจาก Discord
   invite: process.env.DISCORD_INVITE || '',
 };
 const AUTH_SECRET = process.env.AUTH_SECRET || crypto.randomBytes(24).toString('hex');
@@ -128,6 +129,52 @@ async function botListMembers() {
       prime: D.primeRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.primeRoleId)) : false,
     }));
   } catch { return []; }
+}
+
+/* ---------- ปุ่มรับยศใน Discord (Interactions) ---------- */
+
+/**
+ * ตรวจลายเซ็น Ed25519 ที่ Discord ส่งมา — ถ้าไม่ตรงแปลว่าไม่ได้มาจาก Discord จริง
+ * ใช้ crypto ในตัว Node ไม่ต้องลงไลบรารีเพิ่ม (ใส่ DER prefix ให้เป็น SPKI)
+ */
+function verifyDiscordSig(signature, timestamp, rawBody) {
+  if (!D.publicKey || !signature || !timestamp) return false;
+  try {
+    const key = crypto.createPublicKey({
+      key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(D.publicKey, 'hex')]),
+      format: 'der',
+      type: 'spki',
+    });
+    return crypto.verify(null, Buffer.from(timestamp + rawBody), key, Buffer.from(signature, 'hex'));
+  } catch { return false; }
+}
+
+/** โพสต์ข้อความ + รูป + ปุ่มรับยศ ลงห้องที่กำหนด */
+async function botPostRoleButton({ channelId, text, imageUrl, buttonLabel, roleId }) {
+  const embed = { color: 0xff7ab8 };
+  if (text) embed.description = String(text).slice(0, 4000);
+  if (imageUrl) embed.image = { url: String(imageUrl) };
+
+  const body = {
+    embeds: [embed],
+    components: [{
+      type: 1,
+      components: [{
+        type: 2,              // ปุ่ม
+        style: 1,             // สีน้ำเงิน (primary)
+        label: String(buttonLabel || 'รับยศ').slice(0, 80),
+        custom_id: `role:${roleId}`,
+      }],
+    }],
+  };
+
+  const r = await fetch(dcApi(`/channels/${channelId}/messages`), {
+    method: 'POST', headers: botHeaders(), body: JSON.stringify(body),
+  });
+  if (r.ok) return { ok: true };
+  let detail = '';
+  try { detail = (await r.json())?.message || ''; } catch {}
+  return { ok: false, status: r.status, detail };
 }
 
 // ใครกำลังใช้แอปอยู่ (แอปยิง /auth/recheck ทุก 30 วิ) uid -> เวลาเห็นล่าสุด
@@ -462,6 +509,14 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   .msg{font-size:12px;color:#ff5a6a;min-height:16px;margin:8px 0}
   .hidden{display:none}
   .count{font-size:12px;color:#b58aa0}
+  .rb{margin-bottom:16px;background:#17141b;border:2px solid #3a2030;padding:12px 14px}
+  .rb summary{cursor:pointer;font-size:13.5px;font-weight:700;color:#ff7ab8}
+  .rb-body{margin-top:12px;display:flex;flex-direction:column;gap:10px}
+  .rb-body label{display:flex;flex-direction:column;gap:5px;font-size:11.5px;color:#b58aa0;flex:1}
+  .rb-body input,.rb-body textarea{width:100%;padding:8px 10px;background:#0a0a0c;color:#fdeef5;border:2px solid #3a2030;font:inherit;font-size:13px}
+  .rb-body textarea{resize:vertical}
+  .rb-row{display:flex;gap:10px;flex-wrap:wrap}
+  .rb-body .btn{align-self:flex-start;padding:10px 16px}
 </style></head><body>
 <div id="login">
   <h1>🔑 เข้าหน้าจัดการ</h1>
@@ -478,6 +533,24 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     <button class="btn" id="refresh">รีเฟรช</button>
   </div>
   <div class="msg" id="pmsg"></div>
+
+  <details class="rb">
+    <summary>🎁 ส่งปุ่มรับยศเข้า Discord</summary>
+    <div class="rb-body">
+      <div class="rb-row">
+        <label>ไอดีห้อง (คลิกขวาห้อง → Copy Channel ID)<input id="rbChannel" placeholder="เช่น 1234567890123456789"></label>
+        <label>ไอดียศที่จะให้<input id="rbRole" value="1484626107721322747"></label>
+      </div>
+      <label>ข้อความด้านบน<textarea id="rbText" rows="3" placeholder="เช่น กดปุ่มด้านล่างเพื่อรับยศสมาชิก 🎉"></textarea></label>
+      <div class="rb-row">
+        <label>ลิงก์รูป (ไม่ใส่ก็ได้)<input id="rbImage" placeholder="https://..."></label>
+        <label>ชื่อปุ่ม<input id="rbLabel" value="รับยศ"></label>
+      </div>
+      <button class="btn pink" id="rbSend">ส่งเข้าห้อง Discord</button>
+      <div class="msg" id="rbMsg"></div>
+    </div>
+  </details>
+
   <table><thead><tr>
     <th>สมาชิก</th><th>Mooni</th><th>Prime</th><th>หมดอายุ</th>
   </tr></thead><tbody id="rows"></tbody></table>
@@ -554,6 +627,15 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   });
   $('search').addEventListener('input',render);
   $('refresh').addEventListener('click',load);
+  $('rbSend').addEventListener('click',async()=>{
+    const b=$('rbSend');b.disabled=true;$('rbMsg').style.color='#b58aa0';$('rbMsg').textContent='กำลังส่ง…';
+    try{
+      await call('/panel/rolebutton',{channelId:$('rbChannel').value.trim(),roleId:$('rbRole').value.trim(),
+        text:$('rbText').value,imageUrl:$('rbImage').value.trim(),buttonLabel:$('rbLabel').value.trim()});
+      $('rbMsg').style.color='#57d97e';$('rbMsg').textContent='✅ ส่งเข้าห้องแล้ว';
+    }catch(e){$('rbMsg').style.color='#ff5a6a';$('rbMsg').textContent=e.message;}
+    finally{b.disabled=false;}
+  });
   $('enter').addEventListener('click',async()=>{
     KEY=$('key').value.trim();localStorage.setItem('mooniKey',KEY);
     try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();setInterval(load,15000);}
@@ -561,6 +643,55 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   });
   if(KEY){$('enter').click();}
 </script></body></html>`;
+
+/** อ่าน body ดิบเป็นข้อความ (ต้องใช้ตัวดิบตรวจลายเซ็น Discord) */
+function readRaw(req) {
+  return new Promise((resolve) => {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 100000) req.destroy(); });
+    req.on('end', () => resolve(body));
+    req.on('error', () => resolve(''));
+  });
+}
+
+/**
+ * Discord ยิงมาที่นี่ตอนมีคนกดปุ่ม (ตั้ง Interactions Endpoint URL ในหน้า Developer Portal)
+ * ตอบกลับต้องไม่เกิน 3 วินาที
+ */
+async function handleInteraction(req, res) {
+  const raw = await readRaw(req);
+  const sig = req.headers['x-signature-ed25519'];
+  const ts = req.headers['x-signature-timestamp'];
+
+  if (!verifyDiscordSig(sig, ts, raw)) {
+    res.writeHead(401); return res.end('invalid request signature');
+  }
+
+  let body = {};
+  try { body = JSON.parse(raw); } catch {}
+  const json = (obj) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+  const reply = (content) => json({ type: 4, data: { content, flags: 64 } });   // flags 64 = เห็นคนเดียว
+
+  if (body.type === 1) return json({ type: 1 });          // PING ตอนตั้งค่า URL
+
+  if (body.type === 3) {                                   // กดปุ่ม
+    const customId = body.data?.custom_id || '';
+    if (!customId.startsWith('role:')) return reply('ปุ่มนี้ใช้ไม่ได้แล้ว');
+
+    const roleId = customId.slice(5);
+    const uid = body.member?.user?.id;
+    if (!uid) return reply('อ่านข้อมูลผู้ใช้ไม่ได้');
+
+    if ((body.member?.roles || []).includes(roleId)) return reply('✅ คุณมียศนี้อยู่แล้ว');
+
+    const ok = await botSetRole(uid, roleId, true);
+    return reply(ok
+      ? '🎉 รับยศเรียบร้อยแล้ว!'
+      : '❌ ให้ยศไม่สำเร็จ — บอทอาจไม่มีสิทธิ์ Manage Roles หรือยศบอทอยู่ต่ำกว่ายศนี้');
+  }
+
+  return json({ type: 4, data: { content: 'ไม่รองรับคำสั่งนี้', flags: 64 } });
+}
 
 /** อ่าน body เป็น JSON (จำกัดขนาดกันสแปม) */
 function readJson(req) {
@@ -595,6 +726,20 @@ async function handlePanel(pathname, data) {
     if (!roleId) return { code: 400, body: { error: 'ยังไม่ได้ตั้งไอดียศนี้' } };
     const ok = await botSetRole(String(data.uid), roleId, !!data.on);
     return { code: ok ? 200 : 500, body: ok ? { ok: true } : { error: 'บอทกดยศไม่สำเร็จ (เช็คสิทธิ์ Manage Roles + ลำดับยศ)' } };
+  }
+
+  if (pathname === '/panel/rolebutton') {
+    const channelId = String(data.channelId || '').trim();
+    const roleId = String(data.roleId || '').trim();
+    if (!/^\d{5,}$/.test(channelId)) return { code: 400, body: { error: 'ไอดีห้องไม่ถูกต้อง' } };
+    if (!/^\d{5,}$/.test(roleId)) return { code: 400, body: { error: 'ไอดียศไม่ถูกต้อง' } };
+    const out = await botPostRoleButton({
+      channelId, roleId,
+      text: data.text, imageUrl: data.imageUrl, buttonLabel: data.buttonLabel,
+    });
+    return out.ok
+      ? { code: 200, body: { ok: true } }
+      : { code: 500, body: { error: `ส่งไม่สำเร็จ (${out.status}) ${out.detail || 'เช็คว่าบอทเห็นห้องนี้และมีสิทธิ์ส่งข้อความ'}` } };
   }
 
   if (pathname === '/panel/expiry') {
@@ -645,6 +790,12 @@ const server = http.createServer((req, res) => {
     handleAuth(req, res, url, cors).then((handled) => {
       if (!handled) { res.writeHead(404); res.end('not found'); }
     }).catch(() => { try { res.writeHead(500); res.end('error'); } catch {} });
+    return;
+  }
+
+  // Discord ยิงมาตอนมีคนกดปุ่ม (Interactions Endpoint)
+  if (req.method === 'POST' && url.pathname === '/discord/interactions') {
+    handleInteraction(req, res).catch(() => { try { res.writeHead(500); res.end('error'); } catch {} });
     return;
   }
 
