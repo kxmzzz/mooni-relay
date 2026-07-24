@@ -1033,6 +1033,16 @@ const server = http.createServer((req, res) => {
     }));
   }
 
+  // เทียบ public key ที่ตั้งไว้กับในหน้า Developer Portal (public key ไม่ใช่ความลับ)
+  if (req.method === 'GET' && url.pathname === '/debug/keys') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      mooniPublicKey: D.publicKey || '(ยังไม่ตั้ง)',
+      muffinPublicKey: M.publicKey || '(ยังไม่ตั้ง — จะใช้ของ Mooni แทน)',
+      same: !!(D.publicKey && M.publicKey && D.publicKey === M.publicKey),
+    }));
+  }
+
   // ทดสอบ Upstash ตรง ๆ (เขียน+อ่าน) — ไว้ debug ว่าคีย์ถูกไหม (ไม่โชว์ token)
   if (req.method === 'GET' && url.pathname === '/debug/store') {
     (async () => {
