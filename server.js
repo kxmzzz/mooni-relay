@@ -149,13 +149,24 @@ function verifyDiscordSig(signature, timestamp, rawBody) {
   } catch { return false; }
 }
 
-/** โพสต์ข้อความ + รูป + ปุ่มรับยศ ลงห้องที่กำหนด */
-async function botPostRoleButton({ channelId, text, imageUrl, buttonLabel, roleId }) {
+/**
+ * โพสต์ข้อความ + รูป + ปุ่มรับยศ ลงห้องที่กำหนด
+ * รูปใส่ได้ 2 แบบ: อัปโหลดไฟล์ (imageData = base64) หรือใส่ลิงก์ (imageUrl)
+ */
+async function botPostRoleButton({ channelId, text, imageUrl, imageData, imageName, buttonLabel, roleId }) {
   const embed = { color: 0xff7ab8 };
   if (text) embed.description = String(text).slice(0, 4000);
-  if (imageUrl) embed.image = { url: String(imageUrl) };
 
-  const body = {
+  let fileBuf = null, fname = null;
+  if (imageData) {
+    fname = String(imageName || 'image.png').replace(/[^\w.\-]/g, '_');
+    fileBuf = Buffer.from(imageData, 'base64');
+    embed.image = { url: `attachment://${fname}` };
+  } else if (imageUrl) {
+    embed.image = { url: String(imageUrl) };
+  }
+
+  const payload = {
     embeds: [embed],
     components: [{
       type: 1,
@@ -168,9 +179,21 @@ async function botPostRoleButton({ channelId, text, imageUrl, buttonLabel, roleI
     }],
   };
 
-  const r = await fetch(dcApi(`/channels/${channelId}/messages`), {
-    method: 'POST', headers: botHeaders(), body: JSON.stringify(body),
-  });
+  let r;
+  if (fileBuf) {
+    // อัปโหลดไฟล์ต้องส่งแบบ multipart (อย่าตั้ง Content-Type เอง ปล่อยให้ใส่ boundary ให้)
+    const fd = new FormData();
+    fd.append('payload_json', JSON.stringify(payload));
+    fd.append('files[0]', new Blob([fileBuf]), fname);
+    r = await fetch(dcApi(`/channels/${channelId}/messages`), {
+      method: 'POST', headers: { Authorization: `Bot ${D.botToken}` }, body: fd,
+    });
+  } else {
+    r = await fetch(dcApi(`/channels/${channelId}/messages`), {
+      method: 'POST', headers: botHeaders(), body: JSON.stringify(payload),
+    });
+  }
+
   if (r.ok) return { ok: true };
   let detail = '';
   try { detail = (await r.json())?.message || ''; } catch {}
@@ -538,13 +561,14 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     <summary>🎁 ส่งปุ่มรับยศเข้า Discord</summary>
     <div class="rb-body">
       <div class="rb-row">
-        <label>ไอดีห้อง (คลิกขวาห้อง → Copy Channel ID)<input id="rbChannel" placeholder="เช่น 1234567890123456789"></label>
+        <label>ไอดีห้อง (คลิกขวาห้อง → Copy Channel ID)<input id="rbChannel" value="1529781693417001031"></label>
         <label>ไอดียศที่จะให้<input id="rbRole" value="1484626107721322747"></label>
       </div>
       <label>ข้อความด้านบน<textarea id="rbText" rows="3" placeholder="เช่น กดปุ่มด้านล่างเพื่อรับยศสมาชิก 🎉"></textarea></label>
       <div class="rb-row">
-        <label>ลิงก์รูป (ไม่ใส่ก็ได้)<input id="rbImage" placeholder="https://..."></label>
-        <label>ชื่อปุ่ม<input id="rbLabel" value="รับยศ"></label>
+        <label>อัปโหลดรูปจากเครื่อง<input id="rbFile" type="file" accept="image/*"></label>
+        <label>หรือใส่ลิงก์รูป<input id="rbImage" placeholder="https://..."></label>
+        <label style="max-width:130px">ชื่อปุ่ม<input id="rbLabel" value="รับยศ"></label>
       </div>
       <button class="btn pink" id="rbSend">ส่งเข้าห้อง Discord</button>
       <div class="msg" id="rbMsg"></div>
@@ -630,8 +654,19 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   $('rbSend').addEventListener('click',async()=>{
     const b=$('rbSend');b.disabled=true;$('rbMsg').style.color='#b58aa0';$('rbMsg').textContent='กำลังส่ง…';
     try{
+      // มีไฟล์รูป -> อ่านเป็น base64 ส่งไปให้บอทแนบ
+      let imageData=null,imageName=null;
+      const f=$('rbFile').files[0];
+      if(f){
+        if(f.size>8*1024*1024)throw new Error('รูปใหญ่เกิน 8MB');
+        imageName=f.name;
+        imageData=await new Promise((res,rej)=>{const fr=new FileReader();
+          fr.onload=()=>res(String(fr.result).split(',')[1]);fr.onerror=()=>rej(new Error('อ่านไฟล์ไม่ได้'));
+          fr.readAsDataURL(f);});
+      }
       await call('/panel/rolebutton',{channelId:$('rbChannel').value.trim(),roleId:$('rbRole').value.trim(),
-        text:$('rbText').value,imageUrl:$('rbImage').value.trim(),buttonLabel:$('rbLabel').value.trim()});
+        text:$('rbText').value,imageUrl:$('rbImage').value.trim(),imageData,imageName,
+        buttonLabel:$('rbLabel').value.trim()});
       $('rbMsg').style.color='#57d97e';$('rbMsg').textContent='✅ ส่งเข้าห้องแล้ว';
     }catch(e){$('rbMsg').style.color='#ff5a6a';$('rbMsg').textContent=e.message;}
     finally{b.disabled=false;}
@@ -693,11 +728,11 @@ async function handleInteraction(req, res) {
   return json({ type: 4, data: { content: 'ไม่รองรับคำสั่งนี้', flags: 64 } });
 }
 
-/** อ่าน body เป็น JSON (จำกัดขนาดกันสแปม) */
-function readJson(req) {
+/** อ่าน body เป็น JSON (จำกัดขนาดกันสแปม — เผื่อรูปอัปโหลดได้ถึง ~12MB) */
+function readJson(req, max = 12 * 1024 * 1024) {
   return new Promise((resolve) => {
     let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 8000) req.destroy(); });
+    req.on('data', (c) => { body += c; if (body.length > max) req.destroy(); });
     req.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve({}); } });
     req.on('error', () => resolve({}));
   });
@@ -735,7 +770,9 @@ async function handlePanel(pathname, data) {
     if (!/^\d{5,}$/.test(roleId)) return { code: 400, body: { error: 'ไอดียศไม่ถูกต้อง' } };
     const out = await botPostRoleButton({
       channelId, roleId,
-      text: data.text, imageUrl: data.imageUrl, buttonLabel: data.buttonLabel,
+      text: data.text, imageUrl: data.imageUrl,
+      imageData: data.imageData, imageName: data.imageName,
+      buttonLabel: data.buttonLabel,
     });
     return out.ok
       ? { code: 200, body: { ok: true } }
