@@ -397,6 +397,7 @@ async function doShopAdmin(action, data) {
     };
     if (data.payQr) next.payQr = String(data.payQr).slice(0, 500000);
     if (data.payQr === '') delete next.payQr;
+    if (typeof data.freeVerify === 'boolean') next.freeVerify = data.freeVerify;
     await setShopSettings(next);
     broadcast({ type: 'shop:update' });
     return { code: 200, body: { ok: true } };
@@ -477,6 +478,26 @@ const orderThrottle = new Map();
 /* ---------- ตรวจสลิปอัตโนมัติ (EasySlip) ---------- */
 const EASYSLIP_TOKEN = process.env.EASYSLIP_TOKEN || '';
 const AUTO_SLIP = !!EASYSLIP_TOKEN;
+
+/* ---------- โหมดฟรี: อ่าน QR ในสลิปเอง (pure-JS ไม่ต้องต่อ API) ---------- */
+let jsQR, jpegDec, PNGlib;
+try { jsQR = require('jsqr'); jpegDec = require('jpeg-js'); PNGlib = require('pngjs').PNG; } catch { /* ยังไม่ได้ลง */ }
+const FREE_QR_AVAILABLE = !!(jsQR && jpegDec && PNGlib);
+
+/** อ่าน QR ยืนยันสลิปจากรูป → คืน payload (สตริง) หรือ null ถ้าไม่พบ */
+function readSlipQR(buf) {
+  if (!FREE_QR_AVAILABLE) return null;
+  try {
+    let img;
+    if (buf[0] === 0x89 && buf[1] === 0x50) {            // PNG
+      const p = PNGlib.sync.read(buf); img = { data: p.data, width: p.width, height: p.height };
+    } else if (buf[0] === 0xFF && buf[1] === 0xD8) {     // JPEG
+      const j = jpegDec.decode(buf, { useTArray: true, maxMemoryUsageInMB: 512 }); img = { data: j.data, width: j.width, height: j.height };
+    } else return null;
+    const code = jsQR(new Uint8ClampedArray(img.data), img.width, img.height);
+    return code?.data || null;
+  } catch { return null; }
+}
 
 /** ส่งรูปสลิปให้ EasySlip (API v2) ตรวจกับธนาคาร → คืนยอด + เลขอ้างอิง */
 async function verifySlip(buf, filename) {
@@ -642,7 +663,30 @@ async function handleShopOrder(data, req) {
       : { code: 200, body: { ok: true, auto: true, roleFailed: true } };
   }
 
-  /* ===== ไม่ได้ตั้ง EasySlip → ส่งให้แอดมินตรวจเอง ===== */
+  /* ===== โหมดฟรี: อ่าน QR ในสลิป (กันสลิปซ้ำ + กันภาพมั่ว แต่ไม่เช็คยอด) ===== */
+  if (FREE_QR_AVAILABLE && settings.freeVerify !== false) {
+    const qr = readSlipQR(slipBuf);
+    if (!qr) return { code: 400, body: { error: '❌ อ่าน QR ในสลิปไม่ได้ — กรุณาแคปสลิปโอนเงินเต็มใบจากแอปธนาคาร (ต้องเห็น QR ยืนยันสลิปชัด ๆ)' } };
+    const ref = crypto.createHash('sha256').update(qr).digest('hex').slice(0, 24);
+    const used = await upstash(['HGET', 'mooni:usedslips', ref]);
+    if (used.result) return { code: 400, body: { error: '❌ สลิปนี้ถูกใช้ไปแล้ว' } };
+
+    const ok = await botSetRole(discordId, product.roleId, true);
+    if (ok && days) await setRoleExpiry(discordId, product.roleId, Date.now() + days * 86400000);
+    await upstash(['HSET', 'mooni:usedslips', ref, orderId]);
+    await setOrder(orderId, { ...baseOrder, status: ok ? 'approved' : 'failed', auto: true, freeVerify: true, doneAt: Date.now() });
+
+    if (settings.adminChannelId && muffinToken()) {
+      postOrderToDiscord({
+        orderId, channelId: settings.adminChannelId, product, price, days, discordId,
+        note: `ตรวจ QR อัตโนมัติ ✅ (โหมดฟรี — ไม่ได้เช็คยอด)${data.note ? ' · ' + data.note : ''}`,
+        slipBuf, slipName, memberName, autoDone: ok ? 'approved' : 'failed',
+      }).catch(() => {});
+    }
+    return ok ? { code: 200, body: { ok: true, auto: true } } : { code: 200, body: { ok: true, auto: true, roleFailed: true } };
+  }
+
+  /* ===== ไม่ได้ตั้งอะไร → ส่งให้แอดมินตรวจเอง ===== */
   const post = await postOrderToDiscord({
     orderId, channelId: settings.adminChannelId, product, price, days, discordId,
     note: data.note, slipBuf, slipName, memberName,
@@ -1513,7 +1557,7 @@ const server = http.createServer((req, res) => {
       bot: !!D.botToken, store: STORE_ENABLED,
       publicKey: !!D.publicKey, publicKeyLen: D.publicKey.length,
       muffinToken: !!M.botToken, muffinKey: !!M.publicKey, muffinKeyLen: M.publicKey.length,
-      autoSlip: AUTO_SLIP,
+      autoSlip: AUTO_SLIP, freeQr: FREE_QR_AVAILABLE,
     }));
   }
 

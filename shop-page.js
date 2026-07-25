@@ -116,6 +116,7 @@ module.exports = `<!DOCTYPE html><html lang="th"><head>
   <div class="arow"><label>เบอร์/พร้อมเพย์<input id="asNum" type="text"></label><label>ชื่อบัญชี<input id="asAcc" type="text"></label></div>
   <label>ห้องรับออเดอร์ (Channel ID)</label><input id="asCh" type="text">
   <label>รูป QR พร้อมเพย์</label><input id="asQr" type="file" accept="image/*"><img class="preview" id="asQrPrev">
+  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:14px"><input id="asFree" type="checkbox" style="width:auto"> ตรวจสลิปอัตโนมัติ (อ่าน QR ในสลิป · กันซ้ำ)</label>
   <div class="row"><button class="btn soft" data-close="aSet">ปิด</button><button class="btn" id="asSave">บันทึก</button></div>
   <div class="amsg" id="asMsg"></div>
 </div></div>
@@ -283,6 +284,7 @@ async function loadAdmin(){
     $('asName').value=s.shopName||'';$('asNote').value=s.shopNote||'';$('asNum').value=s.payNumber||'';
     $('asAcc').value=s.payName||'';$('asCh').value=s.adminChannelId||'';
     if(s.payQr){$('asQrPrev').src=s.payQr;$('asQrPrev').style.display='block';}
+    $('asFree').checked=s.freeVerify!==false;
     $('apList').innerHTML=adminProducts.map(p=>'<div class="prod">'+(p.image?'<img src="'+esc(p.image)+'">':'')+
       '<div class="nm"><b>'+esc(p.name)+'</b><br><span style="color:#9a93a6">'+[p.price30?'30ว ฿'+p.price30:'',p.price90?'90ว ฿'+p.price90:''].filter(Boolean).join(' / ')+'</span></div>'+
       '<button class="amini" data-ed="'+p.id+'">แก้</button><button class="amini del" data-del="'+p.id+'">ลบ</button></div>').join('')||'<div style="color:#9a93a6;font-size:12px">ยังไม่มีสินค้า</div>';
@@ -299,7 +301,7 @@ $('asSave').addEventListener('click',async()=>{
   const b=$('asSave');b.disabled=true;$('asMsg').style.color='#9a93a6';$('asMsg').textContent='กำลังบันทึก…';
   try{const qr=await fileData($('asQr'));
     await api('settings',{shopName:$('asName').value.trim(),shopNote:$('asNote').value.trim(),payNumber:$('asNum').value.trim(),
-      payName:$('asAcc').value.trim(),adminChannelId:$('asCh').value.trim(),...(qr?{payQr:qr}:{})});
+      payName:$('asAcc').value.trim(),adminChannelId:$('asCh').value.trim(),freeVerify:$('asFree').checked,...(qr?{payQr:qr}:{})});
     $('asMsg').style.color='#4caf7d';$('asMsg').textContent='✅ บันทึกแล้ว';boot();
   }catch(e){$('asMsg').style.color='#e0607f';$('asMsg').textContent=e.message;}finally{b.disabled=false;}
 });
