@@ -377,6 +377,97 @@ const getOrder = async (id) => {
 };
 const setOrder = (id, o) => upstash(['HSET', 'mooni:orders', id, JSON.stringify(o)]);
 
+/** ตัวกลางจัดการร้าน (ใช้ทั้งหน้า /panel และแถบหลังบ้านใน /shop) */
+async function doShopAdmin(action, data) {
+  if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
+
+  if (action === 'get') {
+    const [settings, products] = await Promise.all([getShopSettings(), getProducts()]);
+    return { code: 200, body: { settings, products } };
+  }
+  if (action === 'settings') {
+    const cur = await getShopSettings();
+    const next = {
+      ...cur,
+      shopName: String(data.shopName ?? cur.shopName ?? '').slice(0, 60),
+      shopNote: String(data.shopNote ?? cur.shopNote ?? '').slice(0, 200),
+      payNumber: String(data.payNumber ?? cur.payNumber ?? '').slice(0, 60),
+      payName: String(data.payName ?? cur.payName ?? '').slice(0, 60),
+      adminChannelId: String(data.adminChannelId ?? cur.adminChannelId ?? '').trim(),
+    };
+    if (data.payQr) next.payQr = String(data.payQr).slice(0, 500000);
+    if (data.payQr === '') delete next.payQr;
+    await setShopSettings(next);
+    return { code: 200, body: { ok: true } };
+  }
+  if (action === 'product') {
+    const name = String(data.name || '').trim();
+    const roleId = String(data.roleId || '').trim();
+    const price30 = Math.max(0, Math.round(Number(data.price30) || 0));
+    const price90 = Math.max(0, Math.round(Number(data.price90) || 0));
+    if (!name) return { code: 400, body: { error: 'ใส่ชื่อสินค้า' } };
+    if (!/^\d{5,}$/.test(roleId)) return { code: 400, body: { error: 'ไอดียศไม่ถูกต้อง' } };
+    if (!price30 && !price90) return { code: 400, body: { error: 'ใส่ราคาอย่างน้อย 1 แบบ (30 หรือ 90 วัน)' } };
+    const id = String(data.id || '').trim() || (Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
+    const prev = (await getProducts()).find((p) => p.id === id) || {};
+    await setProduct(id, {
+      name, desc: String(data.desc || '').slice(0, 500), roleId, price30, price90,
+      active: data.active !== false,
+      order: Number(data.order) || prev.order || Date.now(),
+      image: data.image !== undefined ? String(data.image).slice(0, 600000) : prev.image || '',
+    });
+    return { code: 200, body: { ok: true, id } };
+  }
+  if (action === 'delproduct') {
+    await delProduct(String(data.id || ''));
+    return { code: 200, body: { ok: true } };
+  }
+  return { code: 404, body: { error: 'not found' } };
+}
+
+/* ---------- ล็อกอินหลังบ้านร้าน (ผ่านยศ Discord แทนรหัสแอดมิน) ---------- */
+const SHOP_ADMIN_ROLES = String(process.env.SHOP_ADMIN_ROLES || '1484626578943246518,1484626455928373279')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
+function signShopCookie(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const mac = crypto.createHmac('sha256', AUTH_SECRET).update('shopadmin.' + body).digest('base64url');
+  return `${body}.${mac}`;
+}
+function verifyShopCookie(tok) {
+  const [body, mac] = String(tok || '').split('.');
+  if (!body || !mac) return null;
+  const good = crypto.createHmac('sha256', AUTH_SECRET).update('shopadmin.' + body).digest('base64url');
+  const a = Buffer.from(mac), b = Buffer.from(good);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try { const p = JSON.parse(Buffer.from(body, 'base64url').toString()); return p.exp > Date.now() ? p : null; } catch { return null; }
+}
+function getCookie(req, name) {
+  const m = String(req.headers.cookie || '').match(new RegExp('(?:^|; )' + name + '=([^;]+)'));
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
+/** ดึงยศปัจจุบันของสมาชิกด้วยบอท */
+async function fetchMemberRoles(uid) {
+  if (!D.botToken || !uid) return null;
+  try {
+    const r = await fetch(dcApi(`/guilds/${D.guildId}/members/${uid}`), { headers: botHeaders() });
+    if (!r.ok) return null;
+    const m = await r.json();
+    return { roles: m.roles || [], name: m.nick || m.user?.global_name || m.user?.username || '' };
+  } catch { return null; }
+}
+const isShopAdminRoles = (roles) => (roles || []).some((r) => SHOP_ADMIN_ROLES.includes(r));
+
+/** เช็คคุกกี้ + ยศสด — คืน {uid,name} ถ้าเป็นแอดมินร้าน, null ถ้าไม่ใช่ */
+async function shopAdminFromReq(req) {
+  const p = verifyShopCookie(getCookie(req, 'mooni_shop'));
+  if (!p?.uid) return null;
+  const m = await fetchMemberRoles(p.uid);
+  if (!m || !isShopAdminRoles(m.roles)) return null;
+  return { uid: p.uid, name: m.name };
+}
+
 // กันสแปมสั่งซื้อ: ip -> เวลาสั่งล่าสุด
 const orderThrottle = new Map();
 
@@ -614,6 +705,37 @@ async function handleAuth(req, res, url, cors) {
   if (url.pathname === '/auth/callback') {
     const code = url.searchParams.get('code');
     const pair = url.searchParams.get('state') || '';
+
+    // ---- ล็อกอินหลังบ้านร้าน (state ขึ้นต้น shopadmin:) ----
+    if (pair.startsWith('shopadmin:')) {
+      const html = (msg, ok) => resultPage(ok, ok ? 'เข้าหลังบ้านร้านสำเร็จ' : 'เข้าไม่ได้', msg);
+      try {
+        const tr = await fetch('https://discord.com/api/oauth2/token', {
+          method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ client_id: D.clientId, client_secret: D.clientSecret, grant_type: 'authorization_code', code, redirect_uri: REDIRECT_URI }),
+        });
+        if (!tr.ok) throw new Error('token');
+        const tok = await tr.json();
+        const mem = await fetch(`https://discord.com/api/users/@me/guilds/${D.guildId}/member`, {
+          headers: { Authorization: `Bearer ${tok.access_token}` },
+        }).then((r) => r.ok ? r.json() : null);
+        const uid = mem?.user?.id;
+        if (!uid || !isShopAdminRoles(mem.roles || [])) {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          return res.end(html('บัญชีนี้ไม่มียศแอดมินร้าน', false));
+        }
+        const cookie = signShopCookie({ uid, exp: Date.now() + 12 * 60 * 60 * 1000 });
+        res.writeHead(302, {
+          'Set-Cookie': `mooni_shop=${cookie}; HttpOnly; Secure; Path=/; Max-Age=43200; SameSite=Lax`,
+          Location: '/shop',
+        });
+        return res.end();
+      } catch {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(html('ล็อกอินไม่สำเร็จ ลองใหม่อีกครั้ง', false));
+      }
+    }
+
     const rec = authResults.get(pair);
     if (!code || !rec) {
       res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -1293,55 +1415,12 @@ async function handlePanel(pathname, data) {
     return { code: 200, body: { ok: true } };
   }
 
-  /* ---------- จัดการร้านค้า ---------- */
-  if (pathname === '/panel/shop/get') {
-    if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
-    const [settings, products] = await Promise.all([getShopSettings(), getProducts()]);
-    return { code: 200, body: { settings, products } };
-  }
-
-  if (pathname === '/panel/shop/settings') {
-    if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
-    const cur = await getShopSettings();
-    const next = {
-      ...cur,
-      shopName: String(data.shopName ?? cur.shopName ?? '').slice(0, 60),
-      shopNote: String(data.shopNote ?? cur.shopNote ?? '').slice(0, 200),
-      payNumber: String(data.payNumber ?? cur.payNumber ?? '').slice(0, 60),
-      payName: String(data.payName ?? cur.payName ?? '').slice(0, 60),
-      adminChannelId: String(data.adminChannelId ?? cur.adminChannelId ?? '').trim(),
-    };
-    if (data.payQr) next.payQr = String(data.payQr).slice(0, 400000);   // data URI ของ QR
-    if (data.payQr === '') delete next.payQr;
-    await setShopSettings(next);
-    return { code: 200, body: { ok: true } };
-  }
-
-  if (pathname === '/panel/shop/product') {
-    if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
-    const name = String(data.name || '').trim();
-    const roleId = String(data.roleId || '').trim();
-    const price30 = Math.max(0, Math.round(Number(data.price30) || 0));
-    const price90 = Math.max(0, Math.round(Number(data.price90) || 0));
-    if (!name) return { code: 400, body: { error: 'ใส่ชื่อสินค้า' } };
-    if (!/^\d{5,}$/.test(roleId)) return { code: 400, body: { error: 'ไอดียศไม่ถูกต้อง' } };
-    if (!price30 && !price90) return { code: 400, body: { error: 'ใส่ราคาอย่างน้อย 1 แบบ (30 หรือ 90 วัน)' } };
-    const id = String(data.id || '').trim() || (Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
-    const prev = (await getProducts()).find((p) => p.id === id) || {};
-    const p = {
-      name, desc: String(data.desc || '').slice(0, 500), roleId, price30, price90,
-      active: data.active !== false,
-      order: Number(data.order) || prev.order || Date.now(),
-      image: data.image !== undefined ? String(data.image).slice(0, 600000) : prev.image || '',
-    };
-    await setProduct(id, p);
-    return { code: 200, body: { ok: true, id } };
-  }
-
+  /* ---------- จัดการร้านค้า (ใช้ตัวกลาง doShopAdmin) ---------- */
+  if (pathname === '/panel/shop/get') return doShopAdmin('get', data);
+  if (pathname === '/panel/shop/settings') return doShopAdmin('settings', data);
+  if (pathname === '/panel/shop/product') return doShopAdmin('product', data);
   if (pathname === '/panel/shop/delproduct') {
-    if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
-    await delProduct(String(data.id || ''));
-    return { code: 200, body: { ok: true } };
+    return doShopAdmin('delproduct', data);
   }
 
   return { code: 404, body: { error: 'not found' } };
@@ -1417,6 +1496,42 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && url.pathname === '/shop') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(SHOP_HTML);
+  }
+
+  // ล็อกอินหลังบ้านร้าน → เด้งไป Discord (ใช้ /auth/callback เดิม, state=shopadmin)
+  if (req.method === 'GET' && url.pathname === '/shop/login') {
+    if (!AUTH_ENABLED) { res.writeHead(503); return res.end('auth not configured'); }
+    const auth = new URL('https://discord.com/api/oauth2/authorize');
+    auth.searchParams.set('client_id', D.clientId);
+    auth.searchParams.set('response_type', 'code');
+    auth.searchParams.set('redirect_uri', REDIRECT_URI);
+    auth.searchParams.set('scope', 'identify guilds.members.read');
+    auth.searchParams.set('state', 'shopadmin:' + crypto.randomBytes(8).toString('hex'));
+    auth.searchParams.set('prompt', 'consent');
+    res.writeHead(302, { Location: auth.toString() });
+    return res.end();
+  }
+  // แอปหน้าร้านถามว่าเราเป็นแอดมินไหม
+  if (req.method === 'GET' && url.pathname === '/shop/api/me') {
+    shopAdminFromReq(req).then((a) => {
+      res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
+      res.end(JSON.stringify(a ? { admin: true, name: a.name } : { admin: false }));
+    }).catch(() => { try { res.writeHead(200, cors); res.end('{"admin":false}'); } catch {} });
+    return;
+  }
+  // จัดการร้านจากหน้าร้าน (ต้องมียศแอดมิน)
+  if (req.method === 'POST' && url.pathname.startsWith('/shop/api/admin/')) {
+    const action = url.pathname.slice('/shop/api/admin/'.length);
+    (async () => {
+      const admin = await shopAdminFromReq(req);
+      if (!admin) return { code: 403, body: { error: 'ไม่มีสิทธิ์ (ต้องมียศแอดมิน)' } };
+      const data = await readJson(req);
+      return doShopAdmin(action, data);
+    })().then((out) => {
+      res.writeHead(out.code, { 'Content-Type': 'application/json', ...cors });
+      res.end(JSON.stringify(out.body));
+    }).catch(() => { try { res.writeHead(500, cors); res.end(JSON.stringify({ error: 'error' })); } catch {} });
+    return;
   }
   if (req.method === 'GET' && url.pathname === '/shop/api/config') {
     (async () => {

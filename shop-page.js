@@ -74,12 +74,70 @@ module.exports = `<!DOCTYPE html><html lang="th"><head>
   .empty{grid-column:1/-1;text-align:center;color:var(--ink-soft);padding:56px 0;font-size:14px}
   .done{text-align:center;padding:6px 0 2px}.done .big{font-size:46px;margin-bottom:8px}
   footer{text-align:center;color:var(--ink-soft);font-size:11.5px;margin-top:40px;line-height:1.8}
+  footer a{color:var(--pink-d);text-decoration:none}
+
+  /* แถบแอดมิน */
+  #adminbar{position:sticky;top:0;z-index:40;display:none;align-items:center;gap:10px;flex-wrap:wrap;
+    background:rgba(255,255,255,.85);backdrop-filter:blur(8px);border-bottom:1.5px solid var(--line);
+    padding:10px 16px;box-shadow:0 4px 14px rgba(150,120,160,.1)}
+  #adminbar.on{display:flex}
+  #adminbar .who{font-size:13px;font-weight:700;color:#6b5e78;margin-right:auto}
+  #adminbar .btn{padding:8px 14px;font-size:12.5px;border-radius:11px}
+  .amodal .modal{max-width:520px}
+  .prod{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+  .prod img{width:40px;height:40px;object-fit:cover;border-radius:9px}
+  .prod .nm{flex:1;font-size:13px}
+  .amini{padding:6px 11px;font-size:11.5px;border-radius:10px;border:none;cursor:pointer;background:#f1ecf5;color:#7d7488}
+  .amini.del{background:#fde3ea;color:#d5607f}
+  .arow{display:flex;gap:10px;flex-wrap:wrap}
+  .arow>label{flex:1;min-width:120px}
+  .amodal label{font-size:12px}
+  .amodal textarea{width:100%;padding:11px;border:1.5px solid var(--line);border-radius:12px;font:inherit;font-size:13px;background:#faf7fb;resize:vertical}
+  .amsg{font-size:12.5px;text-align:center;min-height:18px;margin-top:8px}
 </style></head><body>
+
+<div id="adminbar">
+  <span class="who" id="abWho">👑 โหมดแอดมิน</span>
+  <button class="btn" id="abSettings">⚙️ ตั้งค่าร้าน</button>
+  <button class="btn" id="abProducts">🛍️ จัดการสินค้า</button>
+  <button class="btn soft" id="abLogout">ออก</button>
+</div>
 <div class="wrap">
   <header><h1 id="shopName">Mooni Shop</h1><p id="shopNote">โอนเงินแล้วแนบสลิป ระบบส่งให้แอดมินตรวจ อนุมัติแล้วได้ยศทันที</p></header>
   <div class="grid" id="grid"><div class="empty">กำลังโหลดสินค้า…</div></div>
-  <footer>ตรวจสลิปโดยแอดมิน · ปกติไม่เกิน 24 ชม.</footer>
+  <footer>ตรวจสลิปโดยแอดมิน · ปกติไม่เกิน 24 ชม.<br><a href="/shop/login" id="adminLogin">เข้าหลังบ้าน (แอดมิน)</a></footer>
 </div>
+
+<!-- แถบหลังบ้าน: ตั้งค่าร้าน -->
+<div class="mask amodal" id="aSet"><div class="modal">
+  <h2>⚙️ ตั้งค่าร้าน</h2><div class="sub">แก้แล้วกดบันทึก มีผลกับหน้าร้านทันที</div>
+  <label>ชื่อร้าน</label><input id="asName" type="text">
+  <label>คำโปรยใต้ชื่อ</label><input id="asNote" type="text">
+  <div class="arow"><label>เบอร์/พร้อมเพย์<input id="asNum" type="text"></label><label>ชื่อบัญชี<input id="asAcc" type="text"></label></div>
+  <label>ห้องรับออเดอร์ (Channel ID)</label><input id="asCh" type="text">
+  <label>รูป QR พร้อมเพย์</label><input id="asQr" type="file" accept="image/*"><img class="preview" id="asQrPrev">
+  <div class="row"><button class="btn soft" data-close="aSet">ปิด</button><button class="btn" id="asSave">บันทึก</button></div>
+  <div class="amsg" id="asMsg"></div>
+</div></div>
+
+<!-- แถบหลังบ้าน: จัดการสินค้า -->
+<div class="mask amodal" id="aProd"><div class="modal">
+  <h2>🛍️ จัดการสินค้า</h2>
+  <div id="apList" style="margin:10px 0"></div>
+  <div style="border-top:1.5px solid var(--line);padding-top:12px">
+    <b style="font-size:13px;color:#6b5e78">➕ เพิ่ม / แก้สินค้า</b>
+    <label>ชื่อสินค้า</label><input id="apName" type="text">
+    <div class="arow"><label>ราคา 30 วัน<input id="apP30" type="number" min="0" value="0"></label>
+      <label>ราคา 90 วัน<input id="apP90" type="number" min="0" value="0"></label></div>
+    <label>รายละเอียด</label><textarea id="apDesc" rows="2"></textarea>
+    <div class="arow"><label>ไอดียศที่จะได้<input id="apRole" type="text" value="1529344448817791016"></label>
+      <label>รูปสินค้า<input id="apImg" type="file" accept="image/*"></label></div>
+    <input type="hidden" id="apId">
+    <div class="row"><button class="btn soft" id="apClear">ล้างฟอร์ม</button><button class="btn" id="apSave">บันทึกสินค้า</button></div>
+    <div class="amsg" id="apMsg"></div>
+  </div>
+  <div class="row" style="margin-top:6px"><button class="btn soft" data-close="aProd" style="flex:1">ปิด</button></div>
+</div></div>
 
 <div class="mask" id="mask">
   <div class="modal">
@@ -202,5 +260,62 @@ $('send2').addEventListener('click',async()=>{
   }catch(e){st.className='status err';st.textContent=e.message;}
   finally{$('send2').disabled=false;}
 });
-boot();
+/* ---------- หลังบ้าน (แอดมิน) ---------- */
+let ADMIN=false,adminProducts=[];
+async function checkAdmin(){
+  try{const me=await fetch('/shop/api/me').then(r=>r.json());
+    if(me.admin){ADMIN=true;$('adminbar').classList.add('on');$('abWho').textContent='👑 '+(me.name||'แอดมิน');$('adminLogin').style.display='none';loadAdmin();}
+  }catch(e){}
+}
+async function api(path,body){
+  const r=await fetch('/shop/api/admin/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  const d=await r.json();if(!r.ok)throw new Error(d.error||'ผิดพลาด');return d;
+}
+function fileData(input){const f=input.files[0];if(!f)return Promise.resolve(null);
+  if(f.size>2*1024*1024)return Promise.reject(new Error('รูปใหญ่เกิน 2MB'));
+  return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>rej(new Error('อ่านไฟล์ไม่ได้'));fr.readAsDataURL(f)});}
+const openA=id=>$(id).classList.add('on'),closeA=id=>$(id).classList.remove('on');
+
+async function loadAdmin(){
+  try{const d=await api('get');const s=d.settings||{};adminProducts=d.products||[];
+    $('asName').value=s.shopName||'';$('asNote').value=s.shopNote||'';$('asNum').value=s.payNumber||'';
+    $('asAcc').value=s.payName||'';$('asCh').value=s.adminChannelId||'';
+    if(s.payQr){$('asQrPrev').src=s.payQr;$('asQrPrev').style.display='block';}
+    $('apList').innerHTML=adminProducts.map(p=>'<div class="prod">'+(p.image?'<img src="'+esc(p.image)+'">':'')+
+      '<div class="nm"><b>'+esc(p.name)+'</b><br><span style="color:#9a93a6">'+[p.price30?'30ว ฿'+p.price30:'',p.price90?'90ว ฿'+p.price90:''].filter(Boolean).join(' / ')+'</span></div>'+
+      '<button class="amini" data-ed="'+p.id+'">แก้</button><button class="amini del" data-del="'+p.id+'">ลบ</button></div>').join('')||'<div style="color:#9a93a6;font-size:12px">ยังไม่มีสินค้า</div>';
+  }catch(e){}
+}
+document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>closeA(b.dataset.close)));
+document.querySelectorAll('.amodal').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('on')}));
+$('abSettings').addEventListener('click',()=>openA('aSet'));
+$('abProducts').addEventListener('click',()=>openA('aProd'));
+$('abLogout').addEventListener('click',()=>{document.cookie='mooni_shop=; Max-Age=0; Path=/';location.reload();});
+$('asQr').addEventListener('change',()=>{const f=$('asQr').files[0];if(!f)return;const r=new FileReader();r.onload=()=>{$('asQrPrev').src=r.result;$('asQrPrev').style.display='block'};r.readAsDataURL(f);});
+
+$('asSave').addEventListener('click',async()=>{
+  const b=$('asSave');b.disabled=true;$('asMsg').style.color='#9a93a6';$('asMsg').textContent='กำลังบันทึก…';
+  try{const qr=await fileData($('asQr'));
+    await api('settings',{shopName:$('asName').value.trim(),shopNote:$('asNote').value.trim(),payNumber:$('asNum').value.trim(),
+      payName:$('asAcc').value.trim(),adminChannelId:$('asCh').value.trim(),...(qr?{payQr:qr}:{})});
+    $('asMsg').style.color='#4caf7d';$('asMsg').textContent='✅ บันทึกแล้ว';boot();
+  }catch(e){$('asMsg').style.color='#e0607f';$('asMsg').textContent=e.message;}finally{b.disabled=false;}
+});
+function clearProd(){$('apId').value='';$('apName').value='';$('apDesc').value='';$('apP30').value='0';$('apP90').value='0';$('apImg').value='';$('apRole').value='1529344448817791016';}
+$('apClear').addEventListener('click',clearProd);
+$('apSave').addEventListener('click',async()=>{
+  const b=$('apSave');b.disabled=true;$('apMsg').style.color='#9a93a6';$('apMsg').textContent='กำลังบันทึก…';
+  try{const img=await fileData($('apImg'));
+    await api('product',{id:$('apId').value,name:$('apName').value.trim(),desc:$('apDesc').value,
+      price30:$('apP30').value,price90:$('apP90').value,roleId:$('apRole').value.trim(),...(img!==null?{image:img}:{})});
+    $('apMsg').style.color='#4caf7d';$('apMsg').textContent='✅ บันทึกแล้ว';clearProd();loadAdmin();boot();
+  }catch(e){$('apMsg').style.color='#e0607f';$('apMsg').textContent=e.message;}finally{b.disabled=false;}
+});
+$('apList').addEventListener('click',async e=>{
+  const ed=e.target.dataset.ed,del=e.target.dataset.del;
+  if(ed){const p=adminProducts.find(x=>x.id===ed);if(p){$('apId').value=p.id;$('apName').value=p.name;$('apDesc').value=p.desc||'';$('apP30').value=p.price30||0;$('apP90').value=p.price90||0;$('apRole').value=p.roleId||'';}}
+  if(del&&confirm('ลบสินค้านี้?')){try{await api('delproduct',{id:del});loadAdmin();boot();}catch(err){alert(err.message)}}
+});
+
+boot();checkAdmin();
 </script></body></html>`;
