@@ -32,5 +32,8 @@ services:
         sync: false
       - key: UPSTASH_REDIS_REST_TOKEN
         sync: false
+      # ---- ตรวจสลิปอัตโนมัติ (EasySlip) ----
+      - key: EASYSLIP_TOKEN
+        sync: false
       - key: DISCORD_INVITE
         sync: false

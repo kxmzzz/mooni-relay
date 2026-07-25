@@ -166,8 +166,8 @@ module.exports = `<!DOCTYPE html><html lang="th"><head>
     </div>
     <!-- ขั้น 3: สำเร็จ -->
     <div class="step" id="s3">
-      <div class="done"><div class="big">🎉</div><h2>ส่งคำสั่งซื้อแล้ว!</h2>
-        <div class="sub" style="margin-top:9px">แอดมินกำลังตรวจสลิป อนุมัติแล้วคุณจะได้รับยศใน Discord อัตโนมัติ</div></div>
+      <div class="done"><div class="big" id="doneBig">🎉</div><h2 id="doneTitle">ส่งคำสั่งซื้อแล้ว!</h2>
+        <div class="sub" id="doneMsg" style="margin-top:9px">แอดมินกำลังตรวจสลิป อนุมัติแล้วคุณจะได้รับยศใน Discord อัตโนมัติ</div></div>
       <button class="btn" id="c3" style="width:100%;margin-top:8px">เสร็จสิ้น</button>
     </div>
   </div>
@@ -256,6 +256,8 @@ $('send2').addEventListener('click',async()=>{
     const r=await fetch('/shop/api/order',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({productId:cur.id,discordId:$('fUid').value.trim(),days:pick.days,slipData,slipName:f.name})});
     const d=await r.json();if(!r.ok)throw new Error(d.error||'ส่งไม่สำเร็จ');
+    if(d.auto&&!d.roleFailed){$('doneBig').textContent='✅';$('doneTitle').textContent='ได้รับยศแล้ว!';$('doneMsg').textContent='ตรวจสลิปอัตโนมัติผ่าน ยศถูกเพิ่มใน Discord ให้คุณแล้ว 🎉';}
+    else if(d.roleFailed){$('doneBig').textContent='⚠️';$('doneTitle').textContent='สลิปผ่านแล้ว';$('doneMsg').textContent='แต่ระบบให้ยศไม่สำเร็จ กรุณาทักแอดมิน (เดี๋ยวแอดมินจัดการให้)';}
     showStep('s3');
   }catch(e){st.className='status err';st.textContent=e.message;}
   finally{$('send2').disabled=false;}

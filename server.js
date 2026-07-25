@@ -474,6 +474,31 @@ async function shopAdminFromReq(req) {
 // กันสแปมสั่งซื้อ: ip -> เวลาสั่งล่าสุด
 const orderThrottle = new Map();
 
+/* ---------- ตรวจสลิปอัตโนมัติ (EasySlip) ---------- */
+const EASYSLIP_TOKEN = process.env.EASYSLIP_TOKEN || '';
+const AUTO_SLIP = !!EASYSLIP_TOKEN;
+
+/** ส่งรูปสลิปให้ EasySlip ตรวจกับธนาคาร → คืนยอด + เลขอ้างอิง */
+async function verifySlip(buf, filename) {
+  try {
+    const fd = new FormData();
+    fd.append('file', new Blob([buf]), filename || 'slip.jpg');
+    const r = await fetch('https://developer.easyslip.com/api/v1/verify', {
+      method: 'POST', headers: { Authorization: `Bearer ${EASYSLIP_TOKEN}` }, body: fd,
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.status !== 200 || !d.data) {
+      const map = { invalid_payload: 'อ่าน QR ในสลิปไม่ได้', image_not_found: 'ไม่พบรูปสลิป', slip_not_found: 'ตรวจไม่พบรายการนี้ (สลิปอาจปลอมหรือยังไม่ขึ้นระบบ)', quota_exceeded: 'โควตาตรวจสลิปหมด' };
+      return { ok: false, error: map[d.message] || d.message || `ตรวจสลิปไม่ผ่าน (${r.status})` };
+    }
+    const dt = d.data;
+    const amount = dt.amount?.amount ?? dt.amount?.local?.amount ?? 0;
+    const transRef = dt.transRef || dt.payload || '';
+    const recv = dt.receiver?.account?.bank?.account || dt.receiver?.account?.proxy?.account || '';
+    return { ok: true, amount: Number(amount) || 0, transRef: String(transRef || ''), receiver: String(recv || '') };
+  } catch (e) { return { ok: false, error: 'เชื่อมระบบตรวจสลิปไม่ได้' }; }
+}
+
 /** ยศที่ซื้อแบบมีวันหมดอายุ — เก็บ (uid:roleId -> เวลา ms) แล้วกวาดถอดเองเมื่อหมดอายุ */
 const setRoleExpiry = (uid, roleId, exp) => upstash(['HSET', 'mooni:roleexp', `${uid}:${roleId}`, String(exp)]);
 
@@ -495,31 +520,37 @@ async function sweepRoleExpiry() {
 setInterval(() => sweepRoleExpiry().catch(() => {}), 5 * 60 * 1000).unref?.();
 
 /** ส่งคำสั่งซื้อ + สลิป เข้าห้องแอดมินใน Discord พร้อมปุ่มอนุมัติ/ปฏิเสธ */
-async function postOrderToDiscord({ orderId, channelId, product, price, days, discordId, note, slipBuf, slipName, memberName }) {
+async function postOrderToDiscord({ orderId, channelId, product, price, days, discordId, note, slipBuf, slipName, memberName, autoDone }) {
   const token = muffinToken();
+  const statusLine = autoDone === 'approved' ? '✅ ตรวจสลิปอัตโนมัติผ่าน — ให้ยศแล้ว'
+    : autoDone === 'failed' ? '⚠️ สลิปผ่าน แต่ให้ยศไม่สำเร็จ (เช็คสิทธิ์บอท)' : '';
   const payload = {
-    content: `🛒 คำสั่งซื้อใหม่ <@${discordId}>`,
+    content: autoDone ? `🧾 บันทึกคำสั่งซื้อ <@${discordId}>` : `🛒 คำสั่งซื้อใหม่ <@${discordId}>`,
     embeds: [{
-      color: 0xf2a8c4,
+      color: autoDone === 'failed' ? 0xffcf3d : 0xf2a8c4,
       title: `🛒 ${product.name}${days ? ` · ${days} วัน` : ''}`,
       description: [
+        statusLine,
         `**ราคา:** ฿${Number(price || 0).toLocaleString('th-TH')}`,
         days ? `**ระยะเวลา:** ${days} วัน` : '',
         `**ผู้ซื้อ:** <@${discordId}> \`${discordId}\`${memberName ? ` (${memberName})` : ''}`,
         note ? `**หมายเหตุ:** ${String(note).slice(0, 300)}` : '',
-        `**ยศที่จะได้:** <@&${product.roleId}>`,
+        `**ยศ:** <@&${product.roleId}>`,
         `**เลขที่:** \`${orderId}\``,
       ].filter(Boolean).join('\n'),
       image: { url: `attachment://${slipName}` },
-      footer: { text: 'กดอนุมัติเพื่อให้ยศอัตโนมัติ' },
+      footer: { text: autoDone ? 'ตรวจสลิปอัตโนมัติ' : 'กดอนุมัติเพื่อให้ยศ' },
     }],
-    components: [{
-      type: 1,
-      components: [
-        { type: 2, style: 3, label: '✅ อนุมัติ', custom_id: `sh:a:${orderId}` },
-        { type: 2, style: 4, label: '❌ ปฏิเสธ', custom_id: `sh:r:${orderId}` },
-      ],
-    }],
+    // โหมด auto = เป็น log เฉย ๆ ไม่ต้องมีปุ่ม
+    ...(autoDone ? {} : {
+      components: [{
+        type: 1,
+        components: [
+          { type: 2, style: 3, label: '✅ อนุมัติ', custom_id: `sh:a:${orderId}` },
+          { type: 2, style: 4, label: '❌ ปฏิเสธ', custom_id: `sh:r:${orderId}` },
+        ],
+      }],
+    }),
   };
 
   const fd = new FormData();
@@ -571,17 +602,48 @@ async function handleShopOrder(data, req) {
     memberName = m?.nick || m?.user?.global_name || m?.user?.username || '';
   } catch { /* ไม่ได้ก็ข้าม */ }
 
+  const baseOrder = {
+    id: orderId, productId: product.id, productName: product.name,
+    price, days, roleId: product.roleId, discordId, note: String(data.note || '').slice(0, 300),
+    createdAt: Date.now(),
+  };
+
+  /* ===== ตรวจสลิปอัตโนมัติ (ถ้าตั้ง EasySlip ไว้) ===== */
+  if (AUTO_SLIP) {
+    const v = await verifySlip(slipBuf, slipName);
+    if (!v.ok) return { code: 400, body: { error: `❌ ${v.error}` } };
+    if (v.amount + 0.01 < price) return { code: 400, body: { error: `❌ ยอดโอนไม่พอ (สลิป ฿${v.amount.toLocaleString('th-TH')} ต้อง ฿${price.toLocaleString('th-TH')})` } };
+    // กันใช้สลิปซ้ำ
+    if (v.transRef) {
+      const used = await upstash(['HGET', 'mooni:usedslips', v.transRef]);
+      if (used.result) return { code: 400, body: { error: '❌ สลิปนี้ถูกใช้ไปแล้ว' } };
+    }
+
+    const ok = await botSetRole(discordId, product.roleId, true);
+    if (ok && days) await setRoleExpiry(discordId, product.roleId, Date.now() + days * 86400000);
+    if (v.transRef) await upstash(['HSET', 'mooni:usedslips', v.transRef, orderId]);
+    await setOrder(orderId, { ...baseOrder, status: ok ? 'approved' : 'failed', auto: true, amount: v.amount, transRef: v.transRef, doneAt: Date.now() });
+
+    // แจ้งเข้าห้องแอดมินเป็น log (ไม่มีปุ่ม)
+    if (settings.adminChannelId && muffinToken()) {
+      postOrderToDiscord({
+        orderId, channelId: settings.adminChannelId, product, price, days, discordId,
+        note: `ตรวจสลิปอัตโนมัติ ✅ (ยอด ฿${v.amount})${data.note ? ' · ' + data.note : ''}`,
+        slipBuf, slipName, memberName, autoDone: ok ? 'approved' : 'failed',
+      }).catch(() => {});
+    }
+    return ok
+      ? { code: 200, body: { ok: true, auto: true } }
+      : { code: 200, body: { ok: true, auto: true, roleFailed: true } };
+  }
+
+  /* ===== ไม่ได้ตั้ง EasySlip → ส่งให้แอดมินตรวจเอง ===== */
   const post = await postOrderToDiscord({
     orderId, channelId: settings.adminChannelId, product, price, days, discordId,
     note: data.note, slipBuf, slipName, memberName,
   });
   if (!post.ok) return { code: 502, body: { error: `ส่งให้แอดมินไม่สำเร็จ (${post.status || ''}) — เช็คห้อง/สิทธิ์บอท` } };
-
-  await setOrder(orderId, {
-    id: orderId, status: 'pending', productId: product.id, productName: product.name,
-    price, days, roleId: product.roleId, discordId, note: String(data.note || '').slice(0, 300),
-    createdAt: Date.now(),
-  });
+  await setOrder(orderId, { ...baseOrder, status: 'pending' });
   return { code: 200, body: { ok: true, orderId } };
 }
 
@@ -1294,7 +1356,7 @@ async function handleInteraction(req, res, pubKey) {
       const approve = customId.startsWith('sh:a:');
       const orderId = customId.slice(5);
       const roles = body.member?.roles || [];
-      if (!isTicketStaff(roles, [])) return reply('❌ ปุ่มนี้ใช้ได้เฉพาะทีมงานเท่านั้น');
+      if (!isTicketStaff(roles, []) && !isShopAdminRoles(roles)) return reply('❌ ปุ่มนี้ใช้ได้เฉพาะทีมงานเท่านั้น');
 
       json({ type: 5 });                                   // deferred (ทุกคนเห็น)
       (async () => {
@@ -1446,6 +1508,7 @@ const server = http.createServer((req, res) => {
       bot: !!D.botToken, store: STORE_ENABLED,
       publicKey: !!D.publicKey, publicKeyLen: D.publicKey.length,
       muffinToken: !!M.botToken, muffinKey: !!M.publicKey, muffinKeyLen: M.publicKey.length,
+      autoSlip: AUTO_SLIP,
     }));
   }
 
