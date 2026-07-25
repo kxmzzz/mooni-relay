@@ -317,5 +317,13 @@ $('apList').addEventListener('click',async e=>{
   if(del&&confirm('ลบสินค้านี้?')){try{await api('delproduct',{id:del});loadAdmin();boot();}catch(err){alert(err.message)}}
 });
 
-boot();checkAdmin();
+/* ---------- อัปเดตสด (WebSocket) — แอดมินแก้แล้วทุกแท็บเห็นทันที ---------- */
+function connectWS(){
+  let ws;
+  try{ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host);}catch(e){return;}
+  ws.onmessage=ev=>{try{const m=JSON.parse(ev.data);if(m.type==='shop:update'){boot();if(ADMIN)loadAdmin();}}catch(e){}};
+  ws.onclose=()=>setTimeout(connectWS,3000);
+}
+
+boot();checkAdmin();connectWS();
 </script></body></html>`;

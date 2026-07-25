@@ -398,6 +398,7 @@ async function doShopAdmin(action, data) {
     if (data.payQr) next.payQr = String(data.payQr).slice(0, 500000);
     if (data.payQr === '') delete next.payQr;
     await setShopSettings(next);
+    broadcast({ type: 'shop:update' });
     return { code: 200, body: { ok: true } };
   }
   if (action === 'product') {
@@ -416,10 +417,12 @@ async function doShopAdmin(action, data) {
       order: Number(data.order) || prev.order || Date.now(),
       image: data.image !== undefined ? String(data.image).slice(0, 600000) : prev.image || '',
     });
+    broadcast({ type: 'shop:update' });
     return { code: 200, body: { ok: true, id } };
   }
   if (action === 'delproduct') {
     await delProduct(String(data.id || ''));
+    broadcast({ type: 'shop:update' });
     return { code: 200, body: { ok: true } };
   }
   return { code: 404, body: { error: 'not found' } };
