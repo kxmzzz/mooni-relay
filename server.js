@@ -398,6 +398,7 @@ async function doShopAdmin(action, data) {
     if (data.payQr) next.payQr = String(data.payQr).slice(0, 500000);
     if (data.payQr === '') delete next.payQr;
     if (typeof data.freeVerify === 'boolean') next.freeVerify = data.freeVerify;
+    if (typeof data.checkAmount === 'boolean') next.checkAmount = data.checkAmount;
     await setShopSettings(next);
     broadcast({ type: 'shop:update' });
     return { code: 200, body: { ok: true } };
@@ -483,6 +484,35 @@ const AUTO_SLIP = !!EASYSLIP_TOKEN;
 let jsQR, jpegDec, PNGlib;
 try { jsQR = require('jsqr'); jpegDec = require('jpeg-js'); PNGlib = require('pngjs').PNG; } catch { /* ยังไม่ได้ลง */ }
 const FREE_QR_AVAILABLE = !!(jsQR && jpegDec && PNGlib);
+
+/* ---------- อ่านยอดเงินในสลิปด้วย OCR (โหมดฟรี) ---------- */
+let Tesseract; try { Tesseract = require('tesseract.js'); } catch { /* ยังไม่ได้ลง */ }
+const OCR_AVAILABLE = !!Tesseract;
+let ocrWorker = null, ocrQueue = Promise.resolve();
+
+async function getOcrWorker() {
+  if (!ocrWorker) ocrWorker = await Tesseract.createWorker(['tha', 'eng']);
+  return ocrWorker;
+}
+
+/** อ่านยอดเงินจากสลิป → คืนตัวเลข (บาท) หรือ null ถ้าอ่านไม่ได้ */
+function ocrAmount(buf) {
+  if (!OCR_AVAILABLE) return Promise.resolve(null);
+  const run = async () => {
+    try {
+      const w = await getOcrWorker();
+      const { data } = await w.recognize(buf);
+      const t = String(data.text || '').replace(/\s+/g, ' ');
+      // ลำดับความมั่นใจ: "เลข บาท" > "จำนวน...เลข" > เลขทศนิยมตัวแรก
+      const m = t.match(/([\d,]+\.\d{2})\s*บาท/) || t.match(/จำนวน\D{0,8}([\d,]+\.\d{2})/) || t.match(/([\d,]+\.\d{2})/);
+      return m ? Number(m[1].replace(/,/g, '')) : null;
+    } catch { return null; }
+  };
+  // ทำทีละงาน กันแรมพุ่งตอนหลายออเดอร์พร้อมกัน
+  const p = ocrQueue.then(run, run);
+  ocrQueue = p.catch(() => {});
+  return p;
+}
 
 /** อ่าน QR ยืนยันสลิปจากรูป → คืน payload (สตริง) หรือ null ถ้าไม่พบ */
 function readSlipQR(buf) {
@@ -671,15 +701,25 @@ async function handleShopOrder(data, req) {
     const used = await upstash(['HGET', 'mooni:usedslips', ref]);
     if (used.result) return { code: 400, body: { error: '❌ สลิปนี้ถูกใช้ไปแล้ว' } };
 
+    // เช็คยอดเงินด้วย OCR (อ่านได้ = เทียบ, อ่านไม่ได้ = ปล่อยผ่านไม่บล็อกลูกค้าจริง)
+    let ocrAmt = null;
+    if (OCR_AVAILABLE && settings.checkAmount !== false) {
+      ocrAmt = await ocrAmount(slipBuf);
+      if (ocrAmt != null && ocrAmt + 0.01 < price) {
+        return { code: 400, body: { error: `❌ ยอดในสลิปไม่พอ (อ่านได้ ฿${ocrAmt.toLocaleString('th-TH')} · ต้อง ฿${price.toLocaleString('th-TH')})` } };
+      }
+    }
+
     const ok = await botSetRole(discordId, product.roleId, true);
     if (ok && days) await setRoleExpiry(discordId, product.roleId, Date.now() + days * 86400000);
     await upstash(['HSET', 'mooni:usedslips', ref, orderId]);
-    await setOrder(orderId, { ...baseOrder, status: ok ? 'approved' : 'failed', auto: true, freeVerify: true, doneAt: Date.now() });
+    await setOrder(orderId, { ...baseOrder, status: ok ? 'approved' : 'failed', auto: true, freeVerify: true, ocrAmount: ocrAmt, doneAt: Date.now() });
 
     if (settings.adminChannelId && muffinToken()) {
+      const amtNote = ocrAmt != null ? `อ่านยอดได้ ฿${ocrAmt}` : (OCR_AVAILABLE && settings.checkAmount !== false ? 'อ่านยอดไม่ได้ (ปล่อยผ่าน)' : 'ไม่ได้เช็คยอด');
       postOrderToDiscord({
         orderId, channelId: settings.adminChannelId, product, price, days, discordId,
-        note: `ตรวจ QR อัตโนมัติ ✅ (โหมดฟรี — ไม่ได้เช็คยอด)${data.note ? ' · ' + data.note : ''}`,
+        note: `ตรวจ QR อัตโนมัติ ✅ · ${amtNote}${data.note ? ' · ' + data.note : ''}`,
         slipBuf, slipName, memberName, autoDone: ok ? 'approved' : 'failed',
       }).catch(() => {});
     }
@@ -1557,7 +1597,7 @@ const server = http.createServer((req, res) => {
       bot: !!D.botToken, store: STORE_ENABLED,
       publicKey: !!D.publicKey, publicKeyLen: D.publicKey.length,
       muffinToken: !!M.botToken, muffinKey: !!M.publicKey, muffinKeyLen: M.publicKey.length,
-      autoSlip: AUTO_SLIP, freeQr: FREE_QR_AVAILABLE,
+      autoSlip: AUTO_SLIP, freeQr: FREE_QR_AVAILABLE, ocr: OCR_AVAILABLE,
     }));
   }
 
