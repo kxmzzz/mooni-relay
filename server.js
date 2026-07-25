@@ -478,17 +478,22 @@ const orderThrottle = new Map();
 const EASYSLIP_TOKEN = process.env.EASYSLIP_TOKEN || '';
 const AUTO_SLIP = !!EASYSLIP_TOKEN;
 
-/** ส่งรูปสลิปให้ EasySlip ตรวจกับธนาคาร → คืนยอด + เลขอ้างอิง */
+/** ส่งรูปสลิปให้ EasySlip (API v2) ตรวจกับธนาคาร → คืนยอด + เลขอ้างอิง */
 async function verifySlip(buf, filename) {
   try {
     const fd = new FormData();
     fd.append('file', new Blob([buf]), filename || 'slip.jpg');
-    const r = await fetch('https://developer.easyslip.com/api/v1/verify', {
+    const r = await fetch('https://api.easyslip.com/v2/verify/bank', {
       method: 'POST', headers: { Authorization: `Bearer ${EASYSLIP_TOKEN}` }, body: fd,
     });
     const d = await r.json().catch(() => ({}));
-    if (r.status !== 200 || !d.data) {
-      const map = { invalid_payload: 'อ่าน QR ในสลิปไม่ได้', image_not_found: 'ไม่พบรูปสลิป', slip_not_found: 'ตรวจไม่พบรายการนี้ (สลิปอาจปลอมหรือยังไม่ขึ้นระบบ)', quota_exceeded: 'โควตาตรวจสลิปหมด' };
+    if (!d.success || !d.data) {
+      const map = {
+        invalid_payload: 'อ่าน QR ในสลิปไม่ได้', image_not_found: 'ไม่พบรูปสลิป',
+        slip_not_found: 'ตรวจไม่พบรายการนี้ (สลิปอาจปลอม/ยังไม่ขึ้นระบบธนาคาร)',
+        quota_exceeded: 'โควตาตรวจสลิปหมด', duplicate_slip: 'สลิปนี้ถูกใช้ไปแล้ว',
+        account_not_found: 'บัญชีไม่ถูกต้อง', invalid_token: 'token EasySlip ไม่ถูกต้อง',
+      };
       return { ok: false, error: map[d.message] || d.message || `ตรวจสลิปไม่ผ่าน (${r.status})` };
     }
     const dt = d.data;
