@@ -380,16 +380,37 @@ const setOrder = (id, o) => upstash(['HSET', 'mooni:orders', id, JSON.stringify(
 // กันสแปมสั่งซื้อ: ip -> เวลาสั่งล่าสุด
 const orderThrottle = new Map();
 
+/** ยศที่ซื้อแบบมีวันหมดอายุ — เก็บ (uid:roleId -> เวลา ms) แล้วกวาดถอดเองเมื่อหมดอายุ */
+const setRoleExpiry = (uid, roleId, exp) => upstash(['HSET', 'mooni:roleexp', `${uid}:${roleId}`, String(exp)]);
+
+async function sweepRoleExpiry() {
+  if (!STORE_ENABLED || !D.botToken) return;
+  const d = await upstash(['HGETALL', 'mooni:roleexp']);
+  const arr = d.result || [];
+  const now = Date.now();
+  for (let i = 0; i < arr.length; i += 2) {
+    const key = arr[i], exp = Number(arr[i + 1]) || 0;
+    if (exp && exp <= now) {
+      const [uid, roleId] = key.split(':');
+      if (uid && roleId) await botSetRole(uid, roleId, false).catch(() => {});
+      await upstash(['HDEL', 'mooni:roleexp', key]);
+    }
+  }
+}
+// กวาดยศหมดอายุทุก 5 นาที (ทำได้เมื่อ relay ตื่นอยู่ — ตั้ง UptimeRobot ช่วยให้ตื่นตลอด)
+setInterval(() => sweepRoleExpiry().catch(() => {}), 5 * 60 * 1000).unref?.();
+
 /** ส่งคำสั่งซื้อ + สลิป เข้าห้องแอดมินใน Discord พร้อมปุ่มอนุมัติ/ปฏิเสธ */
-async function postOrderToDiscord({ orderId, channelId, product, discordId, note, slipBuf, slipName, memberName }) {
+async function postOrderToDiscord({ orderId, channelId, product, price, days, discordId, note, slipBuf, slipName, memberName }) {
   const token = muffinToken();
   const payload = {
     content: `🛒 คำสั่งซื้อใหม่ <@${discordId}>`,
     embeds: [{
-      color: 0xff7ab8,
-      title: `🛒 ${product.name}`,
+      color: 0xf2a8c4,
+      title: `🛒 ${product.name}${days ? ` · ${days} วัน` : ''}`,
       description: [
-        `**ราคา:** ฿${Number(product.price || 0).toLocaleString('th-TH')}`,
+        `**ราคา:** ฿${Number(price || 0).toLocaleString('th-TH')}`,
+        days ? `**ระยะเวลา:** ${days} วัน` : '',
         `**ผู้ซื้อ:** <@${discordId}> \`${discordId}\`${memberName ? ` (${memberName})` : ''}`,
         note ? `**หมายเหตุ:** ${String(note).slice(0, 300)}` : '',
         `**ยศที่จะได้:** <@&${product.roleId}>`,
@@ -429,6 +450,11 @@ async function handleShopOrder(data, req) {
   if (!product) return { code: 400, body: { error: 'ไม่พบสินค้านี้' } };
   if (!product.roleId) return { code: 400, body: { error: 'สินค้านี้ยังไม่ได้ตั้งยศ' } };
 
+  // ระยะเวลา 30/90 วัน (0 = ไม่จำกัด) + ราคาตามระยะเวลา
+  const days = Number(data.days) || 0;
+  const price = days === 30 ? product.price30 : days === 90 ? product.price90 : (product.price || product.price30 || product.price90);
+  if (!price) return { code: 400, body: { error: 'ระยะเวลาที่เลือกไม่ถูกต้อง' } };
+
   const settings = await getShopSettings();
   if (!settings.adminChannelId) return { code: 503, body: { error: 'ร้านยังไม่ได้ตั้งห้องรับออเดอร์' } };
   if (!muffinToken()) return { code: 503, body: { error: 'ร้านยังไม่ได้ตั้งบอท' } };
@@ -452,14 +478,14 @@ async function handleShopOrder(data, req) {
   } catch { /* ไม่ได้ก็ข้าม */ }
 
   const post = await postOrderToDiscord({
-    orderId, channelId: settings.adminChannelId, product, discordId,
+    orderId, channelId: settings.adminChannelId, product, price, days, discordId,
     note: data.note, slipBuf, slipName, memberName,
   });
   if (!post.ok) return { code: 502, body: { error: `ส่งให้แอดมินไม่สำเร็จ (${post.status || ''}) — เช็คห้อง/สิทธิ์บอท` } };
 
   await setOrder(orderId, {
     id: orderId, status: 'pending', productId: product.id, productName: product.name,
-    price: product.price, roleId: product.roleId, discordId, note: String(data.note || '').slice(0, 300),
+    price, days, roleId: product.roleId, discordId, note: String(data.note || '').slice(0, 300),
     createdAt: Date.now(),
   });
   return { code: 200, body: { ok: true, orderId } };
@@ -877,9 +903,10 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
 
       <hr style="border:none;border-top:2px solid #3a2030;margin:6px 0">
       <b style="color:#ff7ab8;font-size:13px">➕ เพิ่ม/แก้สินค้า</b>
+      <label>ชื่อสินค้า<input id="pName" placeholder="เช่น ยศ VIP"></label>
       <div class="rb-row">
-        <label>ชื่อสินค้า<input id="pName" placeholder="เช่น ยศ VIP 30 วัน"></label>
-        <label style="max-width:120px">ราคา (บาท)<input id="pPrice" type="number" min="0" value="0"></label>
+        <label style="max-width:150px">ราคา 30 วัน (บาท)<input id="pPrice30" type="number" min="0" value="0"></label>
+        <label style="max-width:150px">ราคา 90 วัน (บาท)<input id="pPrice90" type="number" min="0" value="0"></label>
       </div>
       <label>รายละเอียด<textarea id="pDesc" rows="2" placeholder="อธิบายสินค้า"></textarea></label>
       <div class="rb-row">
@@ -1002,7 +1029,7 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
       $('pList').innerHTML=(d.products||[]).map(p=>
         '<div style="display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid #221820">'+
         (p.image?'<img src="'+p.image+'" style="width:38px;height:38px;object-fit:cover;border:2px solid #3a2030">':'')+
-        '<div style="flex:1"><b>'+esc(p.name)+'</b> · ฿'+(p.price||0)+(p.active===false?' <span style="color:#ff5a6a">(ปิด)</span>':'')+'</div>'+
+        '<div style="flex:1"><b>'+esc(p.name)+'</b> · '+[p.price30?'30ว ฿'+p.price30:'',p.price90?'90ว ฿'+p.price90:''].filter(Boolean).join(' / ')+(p.active===false?' <span style="color:#ff5a6a">(ปิด)</span>':'')+'</div>'+
         '<button class="btn mini" data-ed="'+p.id+'">แก้</button>'+
         '<button class="btn mini" data-del="'+p.id+'" style="border-color:#6b2f3f">ลบ</button></div>').join('')||'<p style="color:#b58aa0;font-size:12px;margin-top:8px">ยังไม่มีสินค้า</p>';
       window.__products=d.products||[];
@@ -1024,17 +1051,17 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     try{
       const img=await fileToData($('pImg'));
       await call('/panel/shop/product',{id:$('pId').value,name:$('pName').value.trim(),desc:$('pDesc').value,
-        price:$('pPrice').value,roleId:$('pRole').value.trim(),...(img!==null?{image:img}:{})});
+        price30:$('pPrice30').value,price90:$('pPrice90').value,roleId:$('pRole').value.trim(),...(img!==null?{image:img}:{})});
       $('pMsg2').style.color='#57d97e';$('pMsg2').textContent='✅ บันทึกสินค้าแล้ว';
       clearProd();loadShop();
     }catch(e){$('pMsg2').style.color='#ff5a6a';$('pMsg2').textContent=e.message;}
     finally{b.disabled=false;}
   });
-  function clearProd(){$('pId').value='';$('pName').value='';$('pDesc').value='';$('pPrice').value='0';$('pImg').value='';$('pRole').value='1529344448817791016';}
+  function clearProd(){$('pId').value='';$('pName').value='';$('pDesc').value='';$('pPrice30').value='0';$('pPrice90').value='0';$('pImg').value='';$('pRole').value='1529344448817791016';}
   $('pClear').addEventListener('click',clearProd);
   $('pList').addEventListener('click',async e=>{
     const ed=e.target.dataset.ed,del=e.target.dataset.del;
-    if(ed){const p=(window.__products||[]).find(x=>x.id===ed);if(p){$('pId').value=p.id;$('pName').value=p.name;$('pDesc').value=p.desc||'';$('pPrice').value=p.price||0;$('pRole').value=p.roleId||'';$('pName').scrollIntoView({behavior:'smooth'});}}
+    if(ed){const p=(window.__products||[]).find(x=>x.id===ed);if(p){$('pId').value=p.id;$('pName').value=p.name;$('pDesc').value=p.desc||'';$('pPrice30').value=p.price30||0;$('pPrice90').value=p.price90||0;$('pRole').value=p.roleId||'';$('pName').scrollIntoView({behavior:'smooth'});}}
     if(del&&confirm('ลบสินค้านี้?')){try{await call('/panel/shop/delproduct',{id:del});loadShop();}catch(err){alert(err.message)}}
   });
 
@@ -1160,9 +1187,10 @@ async function handleInteraction(req, res, pubKey) {
         }
 
         const ok = await botSetRole(order.discordId, order.roleId, true);
+        if (ok && order.days) await setRoleExpiry(order.discordId, order.roleId, Date.now() + order.days * 86400000);
         await setOrder(orderId, { ...order, status: ok ? 'approved' : 'failed', by, doneAt: Date.now() });
         return editOriginal(appId, itoken, ok
-          ? `✅ <@${by}> **อนุมัติ** แล้ว — <@${order.discordId}> ได้รับยศ <@&${order.roleId}> เรียบร้อย`
+          ? `✅ <@${by}> **อนุมัติ** แล้ว — <@${order.discordId}> ได้รับยศ <@&${order.roleId}>${order.days ? ` (${order.days} วัน)` : ''} เรียบร้อย`
           : `⚠️ อนุมัติแล้วแต่ **ให้ยศไม่สำเร็จ** — เช็คสิทธิ์ Manage Roles และลำดับยศบอท`);
       })().catch(() => {});
       return;
@@ -1293,13 +1321,15 @@ async function handlePanel(pathname, data) {
     if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
     const name = String(data.name || '').trim();
     const roleId = String(data.roleId || '').trim();
-    const price = Math.max(0, Math.round(Number(data.price) || 0));
+    const price30 = Math.max(0, Math.round(Number(data.price30) || 0));
+    const price90 = Math.max(0, Math.round(Number(data.price90) || 0));
     if (!name) return { code: 400, body: { error: 'ใส่ชื่อสินค้า' } };
     if (!/^\d{5,}$/.test(roleId)) return { code: 400, body: { error: 'ไอดียศไม่ถูกต้อง' } };
+    if (!price30 && !price90) return { code: 400, body: { error: 'ใส่ราคาอย่างน้อย 1 แบบ (30 หรือ 90 วัน)' } };
     const id = String(data.id || '').trim() || (Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
     const prev = (await getProducts()).find((p) => p.id === id) || {};
     const p = {
-      name, desc: String(data.desc || '').slice(0, 500), price, roleId,
+      name, desc: String(data.desc || '').slice(0, 500), roleId, price30, price90,
       active: data.active !== false,
       order: Number(data.order) || prev.order || Date.now(),
       image: data.image !== undefined ? String(data.image).slice(0, 600000) : prev.image || '',
@@ -1395,7 +1425,7 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({
         shopName: s.shopName || 'Mooni Shop', shopNote: s.shopNote || '',
         pay: { number: s.payNumber || '', name: s.payName || '', qr: s.payQr || '' },
-        products: products.map((p) => ({ id: p.id, name: p.name, desc: p.desc, price: p.price, image: p.image, active: p.active })),
+        products: products.map((p) => ({ id: p.id, name: p.name, desc: p.desc, price: p.price, price30: p.price30, price90: p.price90, image: p.image, active: p.active })),
       }));
     })().catch(() => { try { res.writeHead(500, cors); res.end('{}'); } catch {} });
     return;
