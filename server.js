@@ -347,6 +347,124 @@ async function createTicket(body, staffRoleIds, categoryId) {
   return editOriginal(appId, itoken, `เปิดห้องให้แล้ว → <#${ch.id}>`);
 }
 
+/* ---------- ร้านค้า (Shop) ---------- */
+
+const SHOP_HTML = require('./shop-page');
+
+/** ตั้งค่าร้าน (ชื่อร้าน/พร้อมเพย์/ห้องแอดมิน) เก็บใน Upstash */
+async function getShopSettings() {
+  const d = await upstash(['GET', 'mooni:shop']);
+  try { return d.result ? JSON.parse(d.result) : {}; } catch { return {}; }
+}
+const setShopSettings = (obj) => upstash(['SET', 'mooni:shop', JSON.stringify(obj)]);
+
+/** รายการสินค้า */
+async function getProducts() {
+  const d = await upstash(['HGETALL', 'mooni:products']);
+  const arr = d.result || [];
+  const out = [];
+  for (let i = 0; i < arr.length; i += 2) {
+    try { out.push({ id: arr[i], ...JSON.parse(arr[i + 1]) }); } catch { /* ข้าม */ }
+  }
+  return out.sort((a, b) => (a.order || 0) - (b.order || 0));
+}
+const setProduct = (id, p) => upstash(['HSET', 'mooni:products', id, JSON.stringify(p)]);
+const delProduct = (id) => upstash(['HDEL', 'mooni:products', id]);
+
+const getOrder = async (id) => {
+  const d = await upstash(['HGET', 'mooni:orders', id]);
+  try { return d.result ? JSON.parse(d.result) : null; } catch { return null; }
+};
+const setOrder = (id, o) => upstash(['HSET', 'mooni:orders', id, JSON.stringify(o)]);
+
+// กันสแปมสั่งซื้อ: ip -> เวลาสั่งล่าสุด
+const orderThrottle = new Map();
+
+/** ส่งคำสั่งซื้อ + สลิป เข้าห้องแอดมินใน Discord พร้อมปุ่มอนุมัติ/ปฏิเสธ */
+async function postOrderToDiscord({ orderId, channelId, product, discordId, note, slipBuf, slipName, memberName }) {
+  const token = muffinToken();
+  const payload = {
+    content: `🛒 คำสั่งซื้อใหม่ <@${discordId}>`,
+    embeds: [{
+      color: 0xff7ab8,
+      title: `🛒 ${product.name}`,
+      description: [
+        `**ราคา:** ฿${Number(product.price || 0).toLocaleString('th-TH')}`,
+        `**ผู้ซื้อ:** <@${discordId}> \`${discordId}\`${memberName ? ` (${memberName})` : ''}`,
+        note ? `**หมายเหตุ:** ${String(note).slice(0, 300)}` : '',
+        `**ยศที่จะได้:** <@&${product.roleId}>`,
+        `**เลขที่:** \`${orderId}\``,
+      ].filter(Boolean).join('\n'),
+      image: { url: `attachment://${slipName}` },
+      footer: { text: 'กดอนุมัติเพื่อให้ยศอัตโนมัติ' },
+    }],
+    components: [{
+      type: 1,
+      components: [
+        { type: 2, style: 3, label: '✅ อนุมัติ', custom_id: `sh:a:${orderId}` },
+        { type: 2, style: 4, label: '❌ ปฏิเสธ', custom_id: `sh:r:${orderId}` },
+      ],
+    }],
+  };
+
+  const fd = new FormData();
+  fd.append('payload_json', JSON.stringify(payload));
+  fd.append('files[0]', new Blob([slipBuf]), slipName);
+  const r = await fetch(dcApi(`/channels/${channelId}/messages`), {
+    method: 'POST', headers: { Authorization: `Bot ${token}` }, body: fd,
+  });
+  if (r.ok) return { ok: true };
+  let detail = ''; try { detail = (await r.json())?.message || ''; } catch {}
+  return { ok: false, status: r.status, detail };
+}
+
+/** รับคำสั่งซื้อจากหน้าร้าน → เก็บ order + ส่งเข้าห้องแอดมินพร้อมสลิป */
+async function handleShopOrder(data, req) {
+  if (!STORE_ENABLED) return { code: 503, body: { error: 'ระบบยังไม่พร้อม (ยังไม่ได้ตั้งคลังข้อมูล)' } };
+
+  const discordId = String(data.discordId || '').trim();
+  if (!/^\d{15,25}$/.test(discordId)) return { code: 400, body: { error: 'Discord User ID ไม่ถูกต้อง' } };
+
+  const product = (await getProducts()).find((p) => p.id === data.productId && p.active !== false);
+  if (!product) return { code: 400, body: { error: 'ไม่พบสินค้านี้' } };
+  if (!product.roleId) return { code: 400, body: { error: 'สินค้านี้ยังไม่ได้ตั้งยศ' } };
+
+  const settings = await getShopSettings();
+  if (!settings.adminChannelId) return { code: 503, body: { error: 'ร้านยังไม่ได้ตั้งห้องรับออเดอร์' } };
+  if (!muffinToken()) return { code: 503, body: { error: 'ร้านยังไม่ได้ตั้งบอท' } };
+
+  // กันสแปม: 1 คำสั่ง/ไอพี ต่อ 10 วิ
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'x';
+  if (Date.now() - (orderThrottle.get(ip) || 0) < 10000) return { code: 429, body: { error: 'ช้าก่อน ลองใหม่อีกครั้งใน 10 วิ' } };
+  orderThrottle.set(ip, Date.now());
+
+  const slipBuf = Buffer.from(String(data.slipData || ''), 'base64');
+  if (!slipBuf.length || slipBuf.length > 6 * 1024 * 1024) return { code: 400, body: { error: 'สลิปไม่ถูกต้องหรือใหญ่เกินไป' } };
+  const slipName = String(data.slipName || 'slip.png').replace(/[^\w.\-]/g, '_');
+
+  const orderId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  // ดึงชื่อผู้ใช้จากบอท (ถ้าได้)
+  let memberName = '';
+  try {
+    const m = await fetch(dcApi(`/guilds/${D.guildId}/members/${discordId}`), { headers: botHeaders() }).then((r) => r.ok ? r.json() : null);
+    memberName = m?.nick || m?.user?.global_name || m?.user?.username || '';
+  } catch { /* ไม่ได้ก็ข้าม */ }
+
+  const post = await postOrderToDiscord({
+    orderId, channelId: settings.adminChannelId, product, discordId,
+    note: data.note, slipBuf, slipName, memberName,
+  });
+  if (!post.ok) return { code: 502, body: { error: `ส่งให้แอดมินไม่สำเร็จ (${post.status || ''}) — เช็คห้อง/สิทธิ์บอท` } };
+
+  await setOrder(orderId, {
+    id: orderId, status: 'pending', productId: product.id, productName: product.name,
+    price: product.price, roleId: product.roleId, discordId, note: String(data.note || '').slice(0, 300),
+    createdAt: Date.now(),
+  });
+  return { code: 200, body: { ok: true, orderId } };
+}
+
 // ใครกำลังใช้แอปอยู่ (แอปยิง /auth/recheck ทุก 30 วิ) uid -> เวลาเห็นล่าสุด
 const lastSeen = new Map();
 const ACTIVE_WINDOW = 90 * 1000;   // เห็นภายใน 90 วิ = กำลังใช้งานอยู่
@@ -741,6 +859,41 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     </div>
   </details>
 
+  <details class="rb">
+    <summary>🛒 ร้านค้า — ตั้งค่า + สินค้า (เปิดหน้าร้าน <a href="/shop" target="_blank" style="color:#8ec9ff">/shop</a>)</summary>
+    <div class="rb-body">
+      <div class="rb-row">
+        <label>ชื่อร้าน<input id="shName" placeholder="Mooni Shop"></label>
+        <label>ห้องรับออเดอร์ (Copy Channel ID)<input id="shChannel" placeholder="ไอดีห้องแอดมิน"></label>
+      </div>
+      <label>คำโปรยใต้ชื่อร้าน<input id="shNote" placeholder="โอนแล้วแนบสลิป รออนุมัติ"></label>
+      <div class="rb-row">
+        <label>เบอร์/พร้อมเพย์<input id="shPayNum" placeholder="0812345678"></label>
+        <label>ชื่อบัญชี<input id="shPayName" placeholder="ชื่อ นามสกุล"></label>
+        <label>รูป QR (ไม่ใส่ก็ได้)<input id="shQr" type="file" accept="image/*"></label>
+      </div>
+      <button class="btn pink" id="shSaveSettings">บันทึกตั้งค่าร้าน</button>
+      <div class="msg" id="shSetMsg"></div>
+
+      <hr style="border:none;border-top:2px solid #3a2030;margin:6px 0">
+      <b style="color:#ff7ab8;font-size:13px">➕ เพิ่ม/แก้สินค้า</b>
+      <div class="rb-row">
+        <label>ชื่อสินค้า<input id="pName" placeholder="เช่น ยศ VIP 30 วัน"></label>
+        <label style="max-width:120px">ราคา (บาท)<input id="pPrice" type="number" min="0" value="0"></label>
+      </div>
+      <label>รายละเอียด<textarea id="pDesc" rows="2" placeholder="อธิบายสินค้า"></textarea></label>
+      <div class="rb-row">
+        <label>ไอดียศที่จะได้<input id="pRole" value="1529344448817791016"></label>
+        <label>รูปสินค้า<input id="pImg" type="file" accept="image/*"></label>
+      </div>
+      <input type="hidden" id="pId">
+      <button class="btn pink" id="pSave">บันทึกสินค้า</button>
+      <button class="btn" id="pClear" style="background:#241823;color:#fff;box-shadow:none">ล้างฟอร์ม</button>
+      <div class="msg" id="pMsg2"></div>
+      <div id="pList"></div>
+    </div>
+  </details>
+
   <table><thead><tr>
     <th>สมาชิก</th><th>Mooni</th><th>Prime</th><th>หมดอายุ</th>
   </tr></thead><tbody id="rows"></tbody></table>
@@ -835,6 +988,56 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     }catch(e){$('tkMsg').style.color='#ff5a6a';$('tkMsg').textContent=e.message;}
     finally{b.disabled=false;}
   });
+  /* ---- ร้านค้า ---- */
+  function fileToData(input){
+    const f=input.files[0]; if(!f)return Promise.resolve(null);
+    if(f.size>2*1024*1024)return Promise.reject(new Error('รูปใหญ่เกิน 2MB'));
+    return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>rej(new Error('อ่านไฟล์ไม่ได้'));fr.readAsDataURL(f)});
+  }
+  async function loadShop(){
+    try{
+      const d=await call('/panel/shop/get',{});const s=d.settings||{};
+      $('shName').value=s.shopName||'';$('shNote').value=s.shopNote||'';
+      $('shPayNum').value=s.payNumber||'';$('shPayName').value=s.payName||'';$('shChannel').value=s.adminChannelId||'';
+      $('pList').innerHTML=(d.products||[]).map(p=>
+        '<div style="display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid #221820">'+
+        (p.image?'<img src="'+p.image+'" style="width:38px;height:38px;object-fit:cover;border:2px solid #3a2030">':'')+
+        '<div style="flex:1"><b>'+esc(p.name)+'</b> · ฿'+(p.price||0)+(p.active===false?' <span style="color:#ff5a6a">(ปิด)</span>':'')+'</div>'+
+        '<button class="btn mini" data-ed="'+p.id+'">แก้</button>'+
+        '<button class="btn mini" data-del="'+p.id+'" style="border-color:#6b2f3f">ลบ</button></div>').join('')||'<p style="color:#b58aa0;font-size:12px;margin-top:8px">ยังไม่มีสินค้า</p>';
+      window.__products=d.products||[];
+    }catch(e){$('pMsg2').style.color='#ff5a6a';$('pMsg2').textContent=e.message;}
+  }
+  $('shSaveSettings').addEventListener('click',async()=>{
+    const b=$('shSaveSettings');b.disabled=true;$('shSetMsg').style.color='#b58aa0';$('shSetMsg').textContent='กำลังบันทึก…';
+    try{
+      const qr=await fileToData($('shQr'));
+      await call('/panel/shop/settings',{shopName:$('shName').value.trim(),shopNote:$('shNote').value.trim(),
+        payNumber:$('shPayNum').value.trim(),payName:$('shPayName').value.trim(),adminChannelId:$('shChannel').value.trim(),
+        ...(qr?{payQr:qr}:{})});
+      $('shSetMsg').style.color='#57d97e';$('shSetMsg').textContent='✅ บันทึกแล้ว';
+    }catch(e){$('shSetMsg').style.color='#ff5a6a';$('shSetMsg').textContent=e.message;}
+    finally{b.disabled=false;}
+  });
+  $('pSave').addEventListener('click',async()=>{
+    const b=$('pSave');b.disabled=true;$('pMsg2').style.color='#b58aa0';$('pMsg2').textContent='กำลังบันทึก…';
+    try{
+      const img=await fileToData($('pImg'));
+      await call('/panel/shop/product',{id:$('pId').value,name:$('pName').value.trim(),desc:$('pDesc').value,
+        price:$('pPrice').value,roleId:$('pRole').value.trim(),...(img!==null?{image:img}:{})});
+      $('pMsg2').style.color='#57d97e';$('pMsg2').textContent='✅ บันทึกสินค้าแล้ว';
+      clearProd();loadShop();
+    }catch(e){$('pMsg2').style.color='#ff5a6a';$('pMsg2').textContent=e.message;}
+    finally{b.disabled=false;}
+  });
+  function clearProd(){$('pId').value='';$('pName').value='';$('pDesc').value='';$('pPrice').value='0';$('pImg').value='';$('pRole').value='1529344448817791016';}
+  $('pClear').addEventListener('click',clearProd);
+  $('pList').addEventListener('click',async e=>{
+    const ed=e.target.dataset.ed,del=e.target.dataset.del;
+    if(ed){const p=(window.__products||[]).find(x=>x.id===ed);if(p){$('pId').value=p.id;$('pName').value=p.name;$('pDesc').value=p.desc||'';$('pPrice').value=p.price||0;$('pRole').value=p.roleId||'';$('pName').scrollIntoView({behavior:'smooth'});}}
+    if(del&&confirm('ลบสินค้านี้?')){try{await call('/panel/shop/delproduct',{id:del});loadShop();}catch(err){alert(err.message)}}
+  });
+
   $('search').addEventListener('input',render);
   $('refresh').addEventListener('click',load);
   $('rbSend').addEventListener('click',async()=>{
@@ -859,7 +1062,7 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   });
   $('enter').addEventListener('click',async()=>{
     KEY=$('key').value.trim();localStorage.setItem('mooniKey',KEY);
-    try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();setInterval(load,15000);}
+    try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();loadShop();setInterval(load,15000);}
     catch(e){$('lmsg').textContent=e.message;}
   });
   if(KEY){$('enter').click();}
@@ -931,6 +1134,37 @@ async function handleInteraction(req, res, pubKey) {
       setTimeout(() => {
         fetch(dcApi(`/channels/${chId}`), { method: 'DELETE', headers: hdr(token) }).catch(() => {});
       }, 3000);
+      return;
+    }
+
+    /* ---- ร้านค้า: อนุมัติ / ปฏิเสธ คำสั่งซื้อ ---- */
+    if (customId.startsWith('sh:a:') || customId.startsWith('sh:r:')) {
+      const approve = customId.startsWith('sh:a:');
+      const orderId = customId.slice(5);
+      const roles = body.member?.roles || [];
+      if (!isTicketStaff(roles, [])) return reply('❌ ปุ่มนี้ใช้ได้เฉพาะทีมงานเท่านั้น');
+
+      json({ type: 5 });                                   // deferred (ทุกคนเห็น)
+      (async () => {
+        const appId = body.application_id, itoken = body.token;
+        const order = await getOrder(orderId);
+        if (!order) return editOriginal(appId, itoken, `ไม่พบคำสั่งซื้อ \`${orderId}\``);
+        if (order.status !== 'pending') {
+          return editOriginal(appId, itoken, `คำสั่งซื้อนี้ถูกจัดการไปแล้ว (${order.status})`);
+        }
+
+        const by = body.member?.user?.id;
+        if (!approve) {
+          await setOrder(orderId, { ...order, status: 'rejected', by, doneAt: Date.now() });
+          return editOriginal(appId, itoken, `❌ <@${by}> **ปฏิเสธ** คำสั่งซื้อของ <@${order.discordId}> แล้ว`);
+        }
+
+        const ok = await botSetRole(order.discordId, order.roleId, true);
+        await setOrder(orderId, { ...order, status: ok ? 'approved' : 'failed', by, doneAt: Date.now() });
+        return editOriginal(appId, itoken, ok
+          ? `✅ <@${by}> **อนุมัติ** แล้ว — <@${order.discordId}> ได้รับยศ <@&${order.roleId}> เรียบร้อย`
+          : `⚠️ อนุมัติแล้วแต่ **ให้ยศไม่สำเร็จ** — เช็คสิทธิ์ Manage Roles และลำดับยศบอท`);
+      })().catch(() => {});
       return;
     }
 
@@ -1031,6 +1265,55 @@ async function handlePanel(pathname, data) {
     return { code: 200, body: { ok: true } };
   }
 
+  /* ---------- จัดการร้านค้า ---------- */
+  if (pathname === '/panel/shop/get') {
+    if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
+    const [settings, products] = await Promise.all([getShopSettings(), getProducts()]);
+    return { code: 200, body: { settings, products } };
+  }
+
+  if (pathname === '/panel/shop/settings') {
+    if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
+    const cur = await getShopSettings();
+    const next = {
+      ...cur,
+      shopName: String(data.shopName ?? cur.shopName ?? '').slice(0, 60),
+      shopNote: String(data.shopNote ?? cur.shopNote ?? '').slice(0, 200),
+      payNumber: String(data.payNumber ?? cur.payNumber ?? '').slice(0, 60),
+      payName: String(data.payName ?? cur.payName ?? '').slice(0, 60),
+      adminChannelId: String(data.adminChannelId ?? cur.adminChannelId ?? '').trim(),
+    };
+    if (data.payQr) next.payQr = String(data.payQr).slice(0, 400000);   // data URI ของ QR
+    if (data.payQr === '') delete next.payQr;
+    await setShopSettings(next);
+    return { code: 200, body: { ok: true } };
+  }
+
+  if (pathname === '/panel/shop/product') {
+    if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
+    const name = String(data.name || '').trim();
+    const roleId = String(data.roleId || '').trim();
+    const price = Math.max(0, Math.round(Number(data.price) || 0));
+    if (!name) return { code: 400, body: { error: 'ใส่ชื่อสินค้า' } };
+    if (!/^\d{5,}$/.test(roleId)) return { code: 400, body: { error: 'ไอดียศไม่ถูกต้อง' } };
+    const id = String(data.id || '').trim() || (Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
+    const prev = (await getProducts()).find((p) => p.id === id) || {};
+    const p = {
+      name, desc: String(data.desc || '').slice(0, 500), price, roleId,
+      active: data.active !== false,
+      order: Number(data.order) || prev.order || Date.now(),
+      image: data.image !== undefined ? String(data.image).slice(0, 600000) : prev.image || '',
+    };
+    await setProduct(id, p);
+    return { code: 200, body: { ok: true, id } };
+  }
+
+  if (pathname === '/panel/shop/delproduct') {
+    if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
+    await delProduct(String(data.id || ''));
+    return { code: 200, body: { ok: true } };
+  }
+
   return { code: 404, body: { error: 'not found' } };
 }
 
@@ -1097,6 +1380,31 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'POST' && url.pathname === '/discord/muffin') {
     handleInteraction(req, res, muffinKey()).catch(() => { try { res.writeHead(500); res.end('error'); } catch {} });
+    return;
+  }
+
+  // ---- ร้านค้า (สาธารณะ) ----
+  if (req.method === 'GET' && url.pathname === '/shop') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(SHOP_HTML);
+  }
+  if (req.method === 'GET' && url.pathname === '/shop/api/config') {
+    (async () => {
+      const [s, products] = await Promise.all([getShopSettings(), getProducts()]);
+      res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
+      res.end(JSON.stringify({
+        shopName: s.shopName || 'Mooni Shop', shopNote: s.shopNote || '',
+        pay: { number: s.payNumber || '', name: s.payName || '', qr: s.payQr || '' },
+        products: products.map((p) => ({ id: p.id, name: p.name, desc: p.desc, price: p.price, image: p.image, active: p.active })),
+      }));
+    })().catch(() => { try { res.writeHead(500, cors); res.end('{}'); } catch {} });
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/shop/api/order') {
+    readJson(req).then((data) => handleShopOrder(data, req)).then((out) => {
+      res.writeHead(out.code, { 'Content-Type': 'application/json', ...cors });
+      res.end(JSON.stringify(out.body));
+    }).catch(() => { try { res.writeHead(500, cors); res.end(JSON.stringify({ error: 'error' })); } catch {} });
     return;
   }
 
