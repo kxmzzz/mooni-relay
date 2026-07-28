@@ -31,7 +31,7 @@ const D = {
   clientSecret: process.env.DISCORD_CLIENT_SECRET || '',
   guildId: process.env.DISCORD_GUILD_ID || '',
   roleId: process.env.DISCORD_ROLE_ID || '',
-  primeRoleId: process.env.DISCORD_PRIME_ROLE_ID || '',   // ยศ Mooni Prime (ปลดล็อก Overlay/Win/Sound)
+  primeRoleId: process.env.DISCORD_PRIME_ROLE_ID || '',   // ยศ Mooni Pro (ปลดล็อก Overlay/Sound)
   botToken: process.env.DISCORD_BOT_TOKEN || '',          // โทเคนบอท — ใช้เช็คยศสดแบบเรียลไทม์ (ถอดยศแล้วรู้ทันที)
   publicKey: process.env.DISCORD_PUBLIC_KEY || '',        // Public Key ของแอป — ใช้ตรวจลายเซ็นปุ่มกดจาก Discord
   invite: process.env.DISCORD_INVITE || '',
@@ -799,9 +799,9 @@ async function checkDiscordMember(accessToken) {
     ? `https://cdn.discordapp.com/avatars/${uid}/${m.user.avatar}.png?size=64`
     : '';
   const roles = Array.isArray(m.roles) ? m.roles : [];
-  // มียศ Prime ไหม (ถ้าแอดมินไม่ได้ตั้ง PRIME_ROLE_ID ไว้ ให้ถือว่าทุกคนที่ล็อกอินได้ = prime)
+  // มียศ Pro ไหม (ถ้าแอดมินไม่ได้ตั้ง PRIME_ROLE_ID ไว้ ให้ถือว่าทุกคนที่ล็อกอินได้ = pro)
   const prime = D.primeRoleId ? roles.includes(D.primeRoleId) : true;
-  // สิทธิ์เข้าแอปและหน้า Win ใช้ยศ Mooni เป็นหลัก ส่วน Prime ใช้ปลดล็อกหน้าเฉพาะของ Prime
+  // สิทธิ์เข้าแอปและหน้า Win ใช้ยศ Mooni เป็นหลัก ส่วน Pro ใช้ปลดล็อกหน้าเฉพาะของ Pro
   const hasRole = roles.includes(D.roleId);
   return hasRole ? { ok: true, name, uid, avatar, prime } : { ok: false, reason: 'no_role', name, uid };
 }
@@ -1117,7 +1117,7 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
 </div>
 <div class="wrap hidden" id="panel">
   <h1>👥 จัดการสมาชิก Mooni</h1>
-  <p class="sub">กดยศ Mooni / Prime และตั้งวันหมดอายุได้เลย · จุดเขียว = กำลังใช้งานอยู่</p>
+  <p class="sub">กดยศ Mooni / Pro และตั้งวันหมดอายุได้เลย · จุดเขียว = กำลังใช้งานอยู่</p>
   <div class="bar">
     <input id="search" placeholder="ค้นหาชื่อ…" style="flex:1;min-width:160px">
     <span class="count" id="count"></span>
@@ -1199,7 +1199,7 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   </details>
 
   <table><thead><tr>
-    <th>สมาชิก</th><th>Mooni</th><th>Prime</th><th>หมดอายุ</th>
+    <th>สมาชิก</th><th>Mooni</th><th>Pro</th><th>หมดอายุ</th>
   </tr></thead><tbody id="rows"></tbody></table>
 </div>
 <script>
