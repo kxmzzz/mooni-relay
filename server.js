@@ -799,9 +799,10 @@ async function checkDiscordMember(accessToken) {
     ? `https://cdn.discordapp.com/avatars/${uid}/${m.user.avatar}.png?size=64`
     : '';
   const roles = Array.isArray(m.roles) ? m.roles : [];
-  const hasRole = roles.includes(D.roleId);
   // มียศ Prime ไหม (ถ้าแอดมินไม่ได้ตั้ง PRIME_ROLE_ID ไว้ ให้ถือว่าทุกคนที่ล็อกอินได้ = prime)
   const prime = D.primeRoleId ? roles.includes(D.primeRoleId) : true;
+  // สิทธิ์เข้าแอปและหน้า Win ใช้ยศ Mooni เป็นหลัก ส่วน Prime ใช้ปลดล็อกหน้าเฉพาะของ Prime
+  const hasRole = roles.includes(D.roleId);
   return hasRole ? { ok: true, name, uid, avatar, prime } : { ok: false, reason: 'no_role', name, uid };
 }
 
