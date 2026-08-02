@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 4000;
-const ADMIN_KEY = process.env.ADMIN_KEY || 'mooni';   // เปลี่ยนตอน deploy!
+const ADMIN_KEY = process.env.ADMIN_KEY || '';
 
 /* ==================================================================
  * ล็อกอิน Discord + เช็คยศ "Mooni" (Discord role gate)
@@ -32,6 +32,7 @@ const D = {
   guildId: process.env.DISCORD_GUILD_ID || '',
   roleId: process.env.DISCORD_ROLE_ID || '',
   primeRoleId: process.env.DISCORD_PRIME_ROLE_ID || '',   // ยศ Mooni Pro (ปลดล็อก Overlay/Sound)
+  mcRoleId: process.env.DISCORD_MC_ROLE_ID || '1533367941691867236',   // ยศ Minecraft (ปลดล็อกหน้า Minecraft)
   botToken: process.env.DISCORD_BOT_TOKEN || '',          // โทเคนบอท — ใช้เช็คยศสดแบบเรียลไทม์ (ถอดยศแล้วรู้ทันที)
   publicKey: process.env.DISCORD_PUBLIC_KEY || '',        // Public Key ของแอป — ใช้ตรวจลายเซ็นปุ่มกดจาก Discord
   invite: process.env.DISCORD_INVITE || '',
@@ -135,6 +136,7 @@ async function botListMembers() {
       avatar: memberAvatar(m),
       mooni: Array.isArray(m.roles) && m.roles.includes(D.roleId),
       prime: D.primeRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.primeRoleId)) : false,
+      mc: D.mcRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.mcRoleId)) : false,
     }));
   } catch { return []; }
 }
@@ -801,9 +803,10 @@ async function checkDiscordMember(accessToken) {
   const roles = Array.isArray(m.roles) ? m.roles : [];
   // มียศ Pro ไหม (ถ้าแอดมินไม่ได้ตั้ง PRIME_ROLE_ID ไว้ ให้ถือว่าทุกคนที่ล็อกอินได้ = pro)
   const prime = D.primeRoleId ? roles.includes(D.primeRoleId) : true;
+  const mc = D.mcRoleId ? roles.includes(D.mcRoleId) : false;   // ยศ Minecraft (ปลดล็อกหน้า Minecraft)
   // สิทธิ์เข้าแอปและหน้า Win ใช้ยศ Mooni เป็นหลัก ส่วน Pro ใช้ปลดล็อกหน้าเฉพาะของ Pro
   const hasRole = roles.includes(D.roleId);
-  return hasRole ? { ok: true, name, uid, avatar, prime } : { ok: false, reason: 'no_role', name, uid };
+  return hasRole ? { ok: true, name, uid, avatar, prime, mc } : { ok: false, reason: 'no_role', name, uid };
 }
 
 /** ใช้บอทเช็คยศปัจจุบันของสมาชิก (เรียลไทม์ — ถอดยศแล้วรู้เลย) */
@@ -820,6 +823,7 @@ async function botCheckMember(uid) {
       inGuild: true,
       mooni: roles.includes(D.roleId),
       prime: D.primeRoleId ? roles.includes(D.primeRoleId) : true,
+      mc: D.mcRoleId ? roles.includes(D.mcRoleId) : false,
       name: m.nick || m.user?.global_name || m.user?.username || '',
     };
   } catch { return { error: true }; }
@@ -925,8 +929,8 @@ async function handleAuth(req, res, url, cors) {
       if (check.ok) {
         const exp = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
         const accessExp = accessRec?.exp || 0;
-        const token = signSession({ uid: check.uid, name: check.name, prime: !!check.prime, exp });
-        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, avatar: check.avatar || '', prime: !!check.prime, accessExp, token, exp, at: Date.now() });
+        const token = signSession({ uid: check.uid, name: check.name, prime: !!check.prime, mc: !!check.mc, exp });
+        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, avatar: check.avatar || '', prime: !!check.prime, mc: !!check.mc, accessExp, token, exp, at: Date.now() });
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(resultPage(true, `ยินดีต้อนรับ ${check.name}!`, 'ล็อกอินสำเร็จ กลับไปที่แอป Mooni ได้เลย — หน้าต่างนี้ปิดได้'));
       } else {
@@ -960,17 +964,17 @@ async function handleAuth(req, res, url, cors) {
 
     // ไม่ได้ตั้งบอท => เช็คยศสดไม่ได้ แต่ยังเช็ควันหมดอายุได้
     if (!D.botToken) {
-      json(200, { valid: timeOk, prime: !!payload.prime, accessExp, reason: timeOk ? '' : 'expired', live: false });
+      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, accessExp, reason: timeOk ? '' : 'expired', live: false });
       return true;
     }
     const chk = await botCheckMember(uid);
     if (chk.error) {   // Discord ล่ม อย่าเพิ่งเตะออก
-      json(200, { valid: timeOk, prime: !!payload.prime, accessExp, reason: timeOk ? '' : 'expired', live: false });
+      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, accessExp, reason: timeOk ? '' : 'expired', live: false });
       return true;
     }
     const valid = !!chk.mooni && timeOk;
     const reason = !chk.mooni ? 'no_role' : !timeOk ? 'expired' : '';
-    json(200, { valid, prime: !!chk.prime, accessExp, name: chk.name, live: true, reason });
+    json(200, { valid, prime: !!chk.prime, mc: !!chk.mc, accessExp, name: chk.name, live: true, reason });
     return true;
   }
 
@@ -980,7 +984,7 @@ async function handleAuth(req, res, url, cors) {
     const rec = authResults.get(pair);
     if (!rec) { json(200, { status: 'unknown' }); return true; }
     if (rec.status === 'ok') {
-      json(200, { status: 'ok', name: rec.name, uid: rec.uid, avatar: rec.avatar || '', prime: !!rec.prime, accessExp: rec.accessExp || 0, token: rec.token, exp: rec.exp });
+      json(200, { status: 'ok', name: rec.name, uid: rec.uid, avatar: rec.avatar || '', prime: !!rec.prime, mc: !!rec.mc, accessExp: rec.accessExp || 0, token: rec.token, exp: rec.exp });
       authResults.delete(pair);   // ใช้ครั้งเดียว
     } else if (rec.status === 'denied') {
       json(200, { status: 'denied', reason: rec.reason, name: rec.name });
@@ -1502,6 +1506,7 @@ function readJson(req, max = 12 * 1024 * 1024) {
 
 /** จัดการ /panel/* (POST) — คืน {code, body} */
 async function handlePanel(pathname, data) {
+  if (!ADMIN_KEY) return { code: 503, body: { error: 'ADMIN_KEY is not configured' } };
   if (data.key !== ADMIN_KEY) return { code: 401, body: { error: 'รหัสผ่านไม่ถูกต้อง' } };
   if (!D.botToken) return { code: 400, body: { error: 'ยังไม่ได้ตั้งบอท (DISCORD_BOT_TOKEN)' } };
 
@@ -1603,7 +1608,7 @@ const server = http.createServer((req, res) => {
   }
 
   // เทียบ public key ที่ตั้งไว้กับในหน้า Developer Portal (public key ไม่ใช่ความลับ)
-  if (req.method === 'GET' && url.pathname === '/debug/keys') {
+  if (process.env.RELAY_DEBUG === '1' && req.method === 'GET' && url.pathname === '/debug/keys') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({
       mooniPublicKey: D.publicKey || '(ยังไม่ตั้ง)',
@@ -1613,7 +1618,7 @@ const server = http.createServer((req, res) => {
   }
 
   // ทดสอบ Upstash ตรง ๆ (เขียน+อ่าน) — ไว้ debug ว่าคีย์ถูกไหม (ไม่โชว์ token)
-  if (req.method === 'GET' && url.pathname === '/debug/store') {
+  if (process.env.RELAY_DEBUG === '1' && req.method === 'GET' && url.pathname === '/debug/store') {
     (async () => {
       const k = 'mooni:selftest';
       const w = await upstash(['SET', k, 'v-' + Date.now()]);
@@ -1732,6 +1737,10 @@ const server = http.createServer((req, res) => {
       try { data = JSON.parse(body); } catch {}
       const headers = { 'Content-Type': 'application/json', ...cors };
 
+      if (!ADMIN_KEY) {
+        res.writeHead(503, headers);
+        return res.end(JSON.stringify({ error: 'ADMIN_KEY is not configured' }));
+      }
       if (data.key !== ADMIN_KEY) {
         res.writeHead(401, headers);
         return res.end(JSON.stringify({ error: 'รหัสผ่านไม่ถูกต้อง' }));
