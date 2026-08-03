@@ -1721,6 +1721,24 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(PANEL_HTML);
   }
+  // หน้าแก้ข้อความในแอปแบบสด (hot-update) — เปิด /strings-admin ใส่รหัสแอดมิน แล้ว Save
+  if (req.method === 'GET' && url.pathname === '/strings-admin') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(`<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mooni — แก้ข้อความในแอป</title>
+<style>body{font-family:system-ui,'Segoe UI','Noto Sans Thai',sans-serif;background:#0a0a0c;color:#fdeef5;max-width:720px;margin:0 auto;padding:20px}h1{color:#ff7ab8;font-size:18px}input,textarea{width:100%;box-sizing:border-box;padding:10px;background:#17141b;color:#fdeef5;border:2px solid #3a2030;border-radius:8px;font:inherit;margin:6px 0}textarea{min-height:320px;font-family:ui-monospace,Consolas,monospace;font-size:13px}button{padding:10px 16px;margin:4px 4px 4px 0;background:#d64f92;color:#fff;border:0;border-radius:8px;font:inherit;font-weight:700;cursor:pointer}.hint{color:#b58aa0;font-size:13px}.status{margin-top:10px;min-height:20px}</style></head><body>
+<h1>แก้ข้อความในแอป (hot-update)</h1>
+<p class="hint">ใส่รหัสแอดมิน → Load → แก้ JSON (คีย์:ข้อความ) → Save &amp; push แล้วทุกแอปที่เปิดอยู่จะเปลี่ยนทันที</p>
+<input id="key" type="password" placeholder="รหัสแอดมิน (ADMIN_KEY)" autocomplete="current-password">
+<textarea id="json" placeholder='{"mc.homeTitle":"...","mc.play":"..."}'></textarea>
+<div><button onclick="load()">Load</button><button onclick="save()">Save &amp; push</button></div>
+<div class="status" id="s"></div>
+<script>
+const S=document.getElementById('s'),K=document.getElementById('key'),J=document.getElementById('json');
+async function load(){try{const r=await fetch('/app-strings');J.value=JSON.stringify(await r.json(),null,2);S.textContent='โหลดแล้ว';}catch(e){S.textContent='โหลดไม่ได้';}}
+async function save(){let obj;try{obj=JSON.parse(J.value||'{}');}catch(e){S.textContent='JSON ผิด: '+e.message;return;}try{const r=await fetch('/app-strings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:K.value,strings:obj})});const d=await r.json();S.textContent=r.ok?('ส่งแล้ว → '+d.sentTo+' เครื่อง'):('ผิดพลาด: '+(d.error||r.status));}catch(e){S.textContent='ส่งไม่ได้: '+e.message;}}
+load();
+</script></body></html>`);
+  }
   if (req.method === 'POST' && url.pathname.startsWith('/panel/')) {
     readJson(req).then((data) => handlePanel(url.pathname, data)).then((out) => {
       res.writeHead(out.code, { 'Content-Type': 'application/json', ...cors });
@@ -1758,6 +1776,31 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, headers);
       res.end(JSON.stringify({ ok: true, sentTo }));
     });
+    return;
+  }
+
+  // ---- ข้อความในแอป (hot-update strings): แอปดึงตอนเปิด, แอดมิน POST เพื่อแก้แล้ว push สด ----
+  if (req.method === 'GET' && url.pathname === '/app-strings') {
+    (async () => {
+      const d = await upstash(['GET', 'mooni:appstrings']);
+      let strings = {};
+      try { if (d && d.result) strings = JSON.parse(d.result); } catch { /* ยังไม่เคยตั้ง */ }
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify(strings));
+    })();
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/app-strings') {
+    readJson(req).then(async (data) => {
+      const headers = { 'Content-Type': 'application/json', ...cors };
+      if (!ADMIN_KEY) { res.writeHead(503, headers); return res.end(JSON.stringify({ error: 'ADMIN_KEY is not configured' })); }
+      if (data.key !== ADMIN_KEY) { res.writeHead(401, headers); return res.end(JSON.stringify({ error: 'รหัสผ่านไม่ถูกต้อง' })); }
+      const strings = (data.strings && typeof data.strings === 'object') ? data.strings : {};
+      await upstash(['SET', 'mooni:appstrings', JSON.stringify(strings)]);
+      const sentTo = broadcast({ type: 'strings', strings });   // push สดถึงทุกแอป
+      console.log(`[relay] อัปเดตข้อความในแอป → ${sentTo} เครื่อง`);
+      res.writeHead(200, headers); res.end(JSON.stringify({ ok: true, sentTo }));
+    }).catch(() => { try { res.writeHead(500, cors); res.end(JSON.stringify({ error: 'error' })); } catch {} });
     return;
   }
 
