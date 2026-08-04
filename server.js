@@ -559,6 +559,17 @@ async function verifySlip(buf, filename) {
 
 /** ยศที่ซื้อแบบมีวันหมดอายุ — เก็บ (uid:roleId -> เวลา ms) แล้วกวาดถอดเองเมื่อหมดอายุ */
 const setRoleExpiry = (uid, roleId, exp) => upstash(['HSET', 'mooni:roleexp', `${uid}:${roleId}`, String(exp)]);
+const delRoleExpiry = (uid, roleId) => upstash(['HDEL', 'mooni:roleexp', `${uid}:${roleId}`]);
+
+/** อ่านวันหมดอายุยศทั้งหมด → map ของ "uid:roleId" -> เวลา ms */
+async function getRoleExpMap() {
+  if (!STORE_ENABLED) return {};
+  const d = await upstash(['HGETALL', 'mooni:roleexp']);
+  const arr = d.result || [];
+  const map = {};
+  for (let i = 0; i < arr.length; i += 2) map[arr[i]] = Number(arr[i + 1]) || 0;
+  return map;
+}
 
 async function sweepRoleExpiry() {
   if (!STORE_ENABLED || !D.botToken) return;
@@ -1123,7 +1134,7 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
 </div>
 <div class="wrap hidden" id="panel">
   <h1>👥 จัดการสมาชิก Mooni</h1>
-  <p class="sub">กดยศ Mooni / Pro และตั้งวันหมดอายุได้เลย · จุดเขียว = กำลังใช้งานอยู่</p>
+  <p class="sub">กดยศ Mooni / Pro / Minecraft และตั้งวันหมดอายุได้เลย · ยศ Minecraft หมดอายุ = บอทถอดยศเอง · จุดเขียว = กำลังใช้งานอยู่</p>
   <div class="bar">
     <input id="search" placeholder="ค้นหาชื่อ…" style="flex:1;min-width:160px">
     <span class="count" id="count"></span>
@@ -1205,7 +1216,7 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   </details>
 
   <table><thead><tr>
-    <th>สมาชิก</th><th>Mooni</th><th>Pro</th><th>หมดอายุ</th>
+    <th>สมาชิก</th><th>Mooni</th><th>Pro</th><th>Minecraft</th><th>หมดอายุแอป</th>
   </tr></thead><tbody id="rows"></tbody></table>
 </div>
 <script>
@@ -1228,30 +1239,34 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     if(h>0)return['เหลือ '+h+' ชม. '+m+' นาที',''];
     return['เหลือ '+m+' นาที',''];
   }
+  const DUR='<option value="">＋ ตั้งเวลา…</option>'+
+    '<option value="300000">5 นาที</option>'+
+    '<option value="3600000">1 ชั่วโมง</option>'+
+    '<option value="86400000">1 วัน</option>'+
+    '<option value="604800000">7 วัน</option>'+
+    '<option value="2592000000">30 วัน</option>'+
+    '<option value="7776000000">90 วัน</option>'+
+    '<option value="15552000000">6 เดือน</option>'+
+    '<option value="31536000000">1 ปี</option>'+
+    '<option value="perm">♾ ถาวร</option>';
   function render(){
     const q=$('search').value.trim().toLowerCase();
     const list=members.filter(m=>!q||m.name.toLowerCase().includes(q));
     $('count').textContent=list.length+' คน · ออนไลน์ '+members.filter(m=>m.active).length;
     $('rows').innerHTML=list.map(m=>{
       const[et,ec]=fmtExp(m.exp);
+      const[met,mec]=fmtExp(m.mcExp);
       return '<tr data-uid="'+m.uid+'">'+
         '<td><div class="who"><div class="face" style="background-image:url(\\''+(m.avatar||'')+'\\')"></div>'+
           '<div><span class="dot '+(m.active?'on':'')+'"></span>'+esc(m.name)+'</div></div></td>'+
         '<td><span class="tag tog '+(m.mooni?'y':'')+'" data-role="mooni">'+(m.mooni?'มี ✓':'ไม่มี')+'</span></td>'+
         '<td><span class="tag tog '+(m.prime?'y':'')+'" data-role="prime">'+(m.prime?'มี ✓':'ไม่มี')+'</span></td>'+
+        '<td><span class="tag tog '+(m.mc?'y':'')+'" data-role="mc">'+(m.mc?'มี ✓':'ไม่มี')+'</span>'+
+          '<div class="exp '+mec+'">'+(m.mc?met:'')+'</div>'+
+          '<div class="setrow"><select class="dur mcdur">'+DUR+'</select>'+
+          '<button class="btn mini mcgone">ถอด</button></div></td>'+
         '<td><div class="exp '+ec+'">'+et+'</div>'+
-          '<div class="setrow"><select class="dur">'+
-          '<option value="">＋ ตั้งเวลา…</option>'+
-          '<option value="300000">5 นาที</option>'+
-          '<option value="3600000">1 ชั่วโมง</option>'+
-          '<option value="86400000">1 วัน</option>'+
-          '<option value="604800000">7 วัน</option>'+
-          '<option value="2592000000">30 วัน</option>'+
-          '<option value="7776000000">90 วัน</option>'+
-          '<option value="15552000000">6 เดือน</option>'+
-          '<option value="31536000000">1 ปี</option>'+
-          '<option value="perm">♾ ถาวร</option>'+
-          '</select>'+
+          '<div class="setrow"><select class="dur">'+DUR+'</select>'+
           '<button class="btn mini gone">หมดอายุ</button></div></td></tr>';
     }).join('');
   }
@@ -1267,7 +1282,8 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
       if(e.target.classList.contains('tog')){
         const role=e.target.dataset.role,on=!e.target.classList.contains('y');
         e.target.textContent='...';await call('/panel/role',{uid,role,on});await load();
-      }else if(e.target.classList.contains('gone')){await call('/panel/expiry',{uid,exp:Date.now()-1000});await load();}
+      }else if(e.target.classList.contains('mcgone')){await call('/panel/mcexpiry',{uid,exp:Date.now()-1000});await load();}
+      else if(e.target.classList.contains('gone')){await call('/panel/expiry',{uid,exp:Date.now()-1000});await load();}
     }catch(err){$('pmsg').textContent=err.message;}
   });
   // เลือกเวลาจากดรอปดาวน์เดียว แล้วตั้งเลยทันที
@@ -1275,7 +1291,8 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     if(!e.target.classList.contains('dur'))return;
     const tr=e.target.closest('tr');const uid=tr.dataset.uid,v=e.target.value;
     if(!v)return;
-    try{await call('/panel/expiry',{uid,exp:v==='perm'?0:Date.now()+Number(v)});await load();}
+    const path=e.target.classList.contains('mcdur')?'/panel/mcexpiry':'/panel/expiry';
+    try{await call(path,{uid,exp:v==='perm'?0:Date.now()+Number(v)});await load();}
     catch(err){$('pmsg').textContent=err.message;e.target.value='';}
   });
   // อ่านไฟล์รูปเป็น base64 (ใช้ร่วมกันทั้ง 2 ฟอร์ม)
@@ -1513,11 +1530,16 @@ async function handlePanel(pathname, data) {
   if (!D.botToken) return { code: 400, body: { error: 'ยังไม่ได้ตั้งบอท (DISCORD_BOT_TOKEN)' } };
 
   if (pathname === '/panel/members') {
-    const [list, accessMap] = await Promise.all([botListMembers(), STORE_ENABLED ? getAccessMap() : {}]);
+    const [list, accessMap, roleExpMap] = await Promise.all([
+      botListMembers(),
+      STORE_ENABLED ? getAccessMap() : {},
+      STORE_ENABLED ? getRoleExpMap() : {},
+    ]);
     const now = Date.now();
     const members = list.map((m) => ({
       ...m,
       exp: accessMap[m.uid]?.exp || 0,
+      mcExp: D.mcRoleId ? (roleExpMap[`${m.uid}:${D.mcRoleId}`] || 0) : 0,
       active: (now - (lastSeen.get(m.uid) || 0)) < ACTIVE_WINDOW,
     }));
     // เรียง: ออนไลน์ก่อน แล้วตามชื่อ
@@ -1526,10 +1548,33 @@ async function handlePanel(pathname, data) {
   }
 
   if (pathname === '/panel/role') {
-    const roleId = data.role === 'prime' ? D.primeRoleId : D.roleId;
+    const roleId = data.role === 'prime' ? D.primeRoleId : data.role === 'mc' ? D.mcRoleId : D.roleId;
     if (!roleId) return { code: 400, body: { error: 'ยังไม่ได้ตั้งไอดียศนี้' } };
     const ok = await botSetRole(String(data.uid), roleId, !!data.on);
+    // ถอดยศ Minecraft เอง = ล้างวันหมดอายุที่ตั้งไว้ด้วย (กันกวาดซ้ำ)
+    if (ok && data.role === 'mc' && !data.on && STORE_ENABLED) await delRoleExpiry(String(data.uid), roleId);
     return { code: ok ? 200 : 500, body: ok ? { ok: true } : { error: 'บอทกดยศไม่สำเร็จ (เช็คสิทธิ์ Manage Roles + ลำดับยศ)' } };
+  }
+
+  // ตั้ง/ล้างวันหมดอายุของยศ Minecraft (หมดแล้วบอทถอดยศเองตอนกวาดทุก 5 นาที)
+  if (pathname === '/panel/mcexpiry') {
+    if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
+    const roleId = D.mcRoleId;
+    if (!roleId) return { code: 400, body: { error: 'ยังไม่ได้ตั้งไอดียศ Minecraft (DISCORD_MC_ROLE_ID)' } };
+    const uid = String(data.uid);
+    const exp = Number(data.exp) || 0;
+    const now = Date.now();
+    if (exp && exp <= now) {                    // เอาออกเดี๋ยวนี้
+      await botSetRole(uid, roleId, false);
+      await delRoleExpiry(uid, roleId);
+    } else if (exp === 0) {                      // ถาวร — ให้ยศไว้ ไม่มีวันหมด
+      await botSetRole(uid, roleId, true);
+      await delRoleExpiry(uid, roleId);
+    } else {                                     // ตั้งวันหมดอายุ — ให้ยศ + ตั้งเวลาถอด
+      await botSetRole(uid, roleId, true);
+      await setRoleExpiry(uid, roleId, exp);
+    }
+    return { code: 200, body: { ok: true } };
   }
 
   if (pathname === '/panel/rolebutton') {
