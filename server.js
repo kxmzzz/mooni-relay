@@ -1081,50 +1081,97 @@ const ADMIN_HTML = `<!DOCTYPE html><html lang="th"><head>
 const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mooni — จัดการสมาชิก</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
-  body{min-height:100vh;padding:18px;font-family:system-ui,'Segoe UI','Leelawadee UI','Noto Sans Thai',sans-serif;
-    color:#fdeef5;background:radial-gradient(800px 400px at 50% -10%,rgba(255,122,184,.12),transparent 60%),#0a0a0c}
-  .wrap{max-width:1000px;margin:0 auto}
-  h1{font-size:20px;color:#ff7ab8;margin-bottom:3px}
-  p.sub{font-size:12.5px;color:#b58aa0;margin-bottom:16px}
-  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
-  input,select{padding:9px 11px;background:#0a0a0c;color:#fdeef5;border:2px solid #3a2030;font:inherit;font-size:13px}
-  input:focus,select:focus{outline:none;border-color:#ff7ab8}
-  .btn{padding:9px 13px;background:#2a1420;color:#ffd7ea;border:2px solid #3a2030;cursor:pointer;font:inherit;font-size:12.5px;font-weight:700}
-  .btn:hover{border-color:#ff7ab8}
-  .btn.pink{background:linear-gradient(100deg,#d64f92,#ff7ab8);color:#2a0f1c;border-color:#000}
-  table{width:100%;border-collapse:collapse;font-size:12.5px}
-  th{text-align:left;color:#b58aa0;font-size:11px;padding:8px 8px;border-bottom:2px solid #3a2030;text-transform:uppercase;letter-spacing:.5px}
-  td{padding:8px 8px;border-bottom:1px solid #221820;vertical-align:middle}
-  tr:hover td{background:rgba(255,122,184,.04)}
-  .who{display:flex;align-items:center;gap:8px}
-  .face{width:30px;height:30px;border-radius:50%;background:#2a1420 center/cover;border:2px solid #3a2030;flex:none}
-  .dot{width:9px;height:9px;border-radius:50%;background:#444;display:inline-block;margin-right:5px;vertical-align:middle}
-  .dot.on{background:#57d97e;box-shadow:0 0 8px #57d97e}
-  .tag{display:inline-block;padding:2px 7px;font-size:10.5px;font-weight:700;border:1px solid #3a2030;border-radius:3px;color:#b58aa0}
-  .tag.y{color:#57d97e;border-color:#2f6b45}
-  .tog{cursor:pointer;user-select:none}
-  .exp{font-size:11.5px;color:#ffcf3d}.exp.perm{color:#7ab8ff}.exp.gone{color:#ff5a6a}
-  .setrow{display:flex;gap:6px;align-items:center;margin-top:6px}
-  .setrow select.dur{min-width:120px;padding:6px 9px;cursor:pointer;border-color:#4a2a3a}
-  .setrow select.dur:hover{border-color:#ff7ab8}
-  .mini{padding:6px 10px;font-size:11px}
-  #login{max-width:340px;margin:60px auto;padding:26px;background:#17141b;border:2px solid #3a2030;box-shadow:6px 6px 0 #000}
-  #login h1{margin-bottom:14px}
-  #login input{width:100%;margin-bottom:10px}
-  #login .btn{width:100%}
-  .msg{font-size:12px;color:#ff5a6a;min-height:16px;margin:8px 0}
+  :root{
+    --bg:#0c0a11;--card:rgba(255,255,255,.038);--card2:rgba(255,255,255,.06);
+    --line:rgba(255,255,255,.09);--line2:rgba(255,255,255,.16);
+    --text:#f5eef4;--muted:#a596ac;--accent:#ff7ab8;--accent2:#c07bff;
+    --green:#5fe0a0;--gold:#ffd36e;--red:#ff6b81;--blue:#7ab8ff;
+    --grad:linear-gradient(135deg,#ff8fc7,#c07bff);
+  }
+  html{-webkit-text-size-adjust:100%}
+  body{min-height:100vh;padding:30px 18px;color:var(--text);
+    font-family:'Anuphan','Noto Sans Thai',system-ui,'Segoe UI',sans-serif;
+    font-size:14px;line-height:1.55;letter-spacing:.1px;
+    background:
+      radial-gradient(950px 520px at 12% -12%,rgba(255,122,184,.18),transparent 55%),
+      radial-gradient(820px 520px at 100% -4%,rgba(192,123,255,.15),transparent 55%),
+      var(--bg);
+    background-attachment:fixed}
+  .wrap{max-width:1060px;margin:0 auto}
+  h1{font-size:25px;font-weight:700;letter-spacing:-.3px;
+    background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  p.sub{font-size:13px;color:var(--muted);margin:7px 0 22px;max-width:720px}
+  .bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+  input,select,textarea{padding:11px 14px;background:rgba(0,0,0,.28);color:var(--text);
+    border:1.5px solid var(--line);border-radius:12px;font:inherit;font-size:13.5px;
+    transition:border-color .15s,box-shadow .15s,background .15s}
+  input::placeholder,textarea::placeholder{color:#7d7183}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
+    box-shadow:0 0 0 3px rgba(255,122,184,.16);background:rgba(0,0,0,.38)}
+  select{cursor:pointer}
+  .btn{padding:10px 16px;background:var(--card2);color:var(--text);border:1.5px solid var(--line);
+    border-radius:12px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;
+    transition:transform .12s,border-color .15s,background .15s,box-shadow .15s}
+  .btn:hover{border-color:var(--line2);background:rgba(255,255,255,.09)}
+  .btn:active{transform:translateY(1px)}
+  .btn.pink{background:var(--grad);color:#25091a;border:none;font-weight:700;
+    box-shadow:0 8px 20px -8px rgba(255,122,184,.65)}
+  .btn.pink:hover{box-shadow:0 10px 26px -8px rgba(255,122,184,.8)}
+  .tablecard{background:var(--card);border:1.5px solid var(--line);border-radius:18px;
+    overflow-x:auto;overflow-y:hidden;backdrop-filter:blur(10px);box-shadow:0 20px 60px -34px rgba(0,0,0,.85)}
+  table{width:100%;border-collapse:collapse;font-size:13px;min-width:600px}
+  th{text-align:left;color:var(--muted);font-size:11px;font-weight:600;padding:14px;
+    border-bottom:1.5px solid var(--line);text-transform:uppercase;letter-spacing:.6px;
+    background:rgba(255,255,255,.022)}
+  td{padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+  tbody tr:last-child td{border-bottom:none}
+  tr:hover td{background:rgba(255,122,184,.05)}
+  .who{display:flex;align-items:center;gap:10px}
+  .face{width:34px;height:34px;border-radius:50%;background:#241826 center/cover;border:2px solid var(--line2);flex:none}
+  .dot{width:8px;height:8px;border-radius:50%;background:#4a4152;display:inline-block;margin-right:6px;vertical-align:middle}
+  .dot.on{background:var(--green);box-shadow:0 0 0 3px rgba(95,224,160,.2)}
+  .tag{display:inline-block;padding:4px 12px;font-size:11px;font-weight:600;
+    border:1.5px solid var(--line);border-radius:999px;color:var(--muted);background:rgba(255,255,255,.025)}
+  .tag.y{color:#0e2a1c;background:linear-gradient(135deg,#7fe6b0,#5fe0a0);border-color:transparent;font-weight:700}
+  .tog{cursor:pointer;user-select:none;transition:transform .12s,filter .12s}
+  .tog:hover{transform:translateY(-1px);filter:brightness(1.08)}
+  .exp{font-size:11.5px;color:var(--gold);margin-top:5px}
+  .exp.perm{color:var(--blue)}.exp.gone{color:var(--red)}
+  .setrow{display:flex;gap:6px;align-items:center;margin-top:7px}
+  .setrow select.dur{min-width:134px;padding:7px 11px;border-radius:10px;font-size:12px}
+  .mini{padding:7px 12px;font-size:11.5px;border-radius:10px}
+  #login{max-width:360px;margin:12vh auto 0;padding:32px 28px;background:var(--card);
+    border:1.5px solid var(--line);border-radius:22px;backdrop-filter:blur(12px);
+    box-shadow:0 34px 90px -34px rgba(0,0,0,.85)}
+  #login h1{margin-bottom:18px;font-size:22px}
+  #login input{width:100%;margin-bottom:12px}
+  #login .btn{width:100%;padding:12px}
+  .msg{font-size:12.5px;color:var(--red);min-height:16px;margin:8px 0}
   .hidden{display:none}
-  .count{font-size:12px;color:#b58aa0}
-  .rb{margin-bottom:16px;background:#17141b;border:2px solid #3a2030;padding:12px 14px}
-  .rb summary{cursor:pointer;font-size:13.5px;font-weight:700;color:#ff7ab8}
-  .rb-body{margin-top:12px;display:flex;flex-direction:column;gap:10px}
-  .rb-body label{display:flex;flex-direction:column;gap:5px;font-size:11.5px;color:#b58aa0;flex:1}
-  .rb-body input,.rb-body textarea{width:100%;padding:8px 10px;background:#0a0a0c;color:#fdeef5;border:2px solid #3a2030;font:inherit;font-size:13px}
+  .count{font-size:12.5px;color:var(--muted)}
+  .rb{margin-bottom:14px;background:var(--card);border:1.5px solid var(--line);
+    border-radius:16px;padding:2px 18px;backdrop-filter:blur(10px)}
+  .rb summary{cursor:pointer;font-size:14px;font-weight:700;color:var(--accent);
+    padding:15px 0;list-style:none;display:flex;align-items:center;gap:9px}
+  .rb summary::-webkit-details-marker{display:none}
+  .rb summary::before{content:'▸';color:var(--muted);transition:transform .2s;font-size:11px}
+  .rb[open] summary::before{transform:rotate(90deg)}
+  .rb-body{margin:2px 0 18px;display:flex;flex-direction:column;gap:12px}
+  .rb-body label{display:flex;flex-direction:column;gap:6px;font-size:11.5px;color:var(--muted);flex:1}
+  .rb-body input,.rb-body textarea{width:100%}
   .rb-body textarea{resize:vertical}
-  .rb-row{display:flex;gap:10px;flex-wrap:wrap}
-  .rb-body .btn{align-self:flex-start;padding:10px 16px}
+  .rb-row{display:flex;gap:12px;flex-wrap:wrap}
+  .rb-body .btn{align-self:flex-start;padding:11px 18px}
+  hr{border:none;border-top:1.5px solid var(--line);margin:4px 0}
+  a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+  ::-webkit-scrollbar{height:9px;width:9px}
+  ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:999px}
+  ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.24)}
 </style></head><body>
 <div id="login">
   <h1>🔑 เข้าหน้าจัดการ</h1>
@@ -1215,9 +1262,9 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     </div>
   </details>
 
-  <table><thead><tr>
+  <div class="tablecard"><table><thead><tr>
     <th>สมาชิก</th><th>Mooni</th><th>Pro</th><th>Minecraft</th><th>หมดอายุแอป</th>
-  </tr></thead><tbody id="rows"></tbody></table>
+  </tr></thead><tbody id="rows"></tbody></table></div>
 </div>
 <script>
   const $=id=>document.getElementById(id);
