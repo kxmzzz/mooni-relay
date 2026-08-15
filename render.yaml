@@ -25,6 +25,8 @@ services:
         sync: false
       - key: DISCORD_MC_ROLE_ID
         sync: false
+      - key: DISCORD_CANDY_ROLE_ID
+        sync: false
       - key: DISCORD_BOT_TOKEN
         sync: false
       - key: DISCORD_PUBLIC_KEY

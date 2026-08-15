@@ -32,7 +32,8 @@ const D = {
   guildId: process.env.DISCORD_GUILD_ID || '',
   roleId: process.env.DISCORD_ROLE_ID || '',
   primeRoleId: process.env.DISCORD_PRIME_ROLE_ID || '',   // ยศ Mooni Pro (ปลดล็อก Overlay/Sound)
-  mcRoleId: process.env.DISCORD_MC_ROLE_ID || '1533367941691867236',   // ยศ Minecraft (ปลดล็อกหน้า Minecraft)
+  mcRoleId: process.env.DISCORD_MC_ROLE_ID || '1538119728759832636',   // ยศ Minecraft (ปลดล็อกหน้า Minecraft)
+  candyRoleId: process.env.DISCORD_CANDY_ROLE_ID || '1533367941691867236',   // ยศ Candy Block (ปลดล็อกการ์ด Candy Block ในหน้า Minecraft)
   botToken: process.env.DISCORD_BOT_TOKEN || '',          // โทเคนบอท — ใช้เช็คยศสดแบบเรียลไทม์ (ถอดยศแล้วรู้ทันที)
   publicKey: process.env.DISCORD_PUBLIC_KEY || '',        // Public Key ของแอป — ใช้ตรวจลายเซ็นปุ่มกดจาก Discord
   invite: process.env.DISCORD_INVITE || '',
@@ -137,6 +138,7 @@ async function botListMembers() {
       mooni: Array.isArray(m.roles) && m.roles.includes(D.roleId),
       prime: D.primeRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.primeRoleId)) : false,
       mc: D.mcRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.mcRoleId)) : false,
+      candy: D.candyRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.candyRoleId)) : false,
     }));
   } catch { return []; }
 }
@@ -815,10 +817,11 @@ async function checkDiscordMember(accessToken) {
   // มียศ Pro ไหม (ถ้าแอดมินไม่ได้ตั้ง PRIME_ROLE_ID ไว้ ให้ถือว่าทุกคนที่ล็อกอินได้ = pro)
   const prime = D.primeRoleId ? roles.includes(D.primeRoleId) : true;
   const mc = D.mcRoleId ? roles.includes(D.mcRoleId) : false;   // ยศ Minecraft (ปลดล็อกหน้า Minecraft)
+  const candy = D.candyRoleId ? roles.includes(D.candyRoleId) : false;   // ยศ Candy Block (ปลดล็อกการ์ด Candy Block)
   const mooni = roles.includes(D.roleId);                        // ยศ Mooni (เข้าแอปได้เต็มทุกหน้า)
   // เข้าแอปได้ถ้ามียศ Mooni "หรือ" ยศ Minecraft — คนที่มีแค่ mc จะเข้าได้เฉพาะหน้า Minecraft
   const allowed = mooni || mc;
-  return allowed ? { ok: true, name, uid, avatar, prime, mc, mooni } : { ok: false, reason: 'no_role', name, uid };
+  return allowed ? { ok: true, name, uid, avatar, prime, mc, candy, mooni } : { ok: false, reason: 'no_role', name, uid };
 }
 
 /** ใช้บอทเช็คยศปัจจุบันของสมาชิก (เรียลไทม์ — ถอดยศแล้วรู้เลย) */
@@ -836,6 +839,7 @@ async function botCheckMember(uid) {
       mooni: roles.includes(D.roleId),
       prime: D.primeRoleId ? roles.includes(D.primeRoleId) : true,
       mc: D.mcRoleId ? roles.includes(D.mcRoleId) : false,
+      candy: D.candyRoleId ? roles.includes(D.candyRoleId) : false,
       name: m.nick || m.user?.global_name || m.user?.username || '',
     };
   } catch { return { error: true }; }
@@ -941,8 +945,8 @@ async function handleAuth(req, res, url, cors) {
       if (check.ok) {
         const exp = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
         const accessExp = accessRec?.exp || 0;
-        const token = signSession({ uid: check.uid, name: check.name, prime: !!check.prime, mc: !!check.mc, mooni: !!check.mooni, exp });
-        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, avatar: check.avatar || '', prime: !!check.prime, mc: !!check.mc, mooni: !!check.mooni, accessExp, token, exp, at: Date.now() });
+        const token = signSession({ uid: check.uid, name: check.name, prime: !!check.prime, mc: !!check.mc, candy: !!check.candy, mooni: !!check.mooni, exp });
+        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, avatar: check.avatar || '', prime: !!check.prime, mc: !!check.mc, candy: !!check.candy, mooni: !!check.mooni, accessExp, token, exp, at: Date.now() });
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(resultPage(true, `ยินดีต้อนรับ ${check.name}!`, 'ล็อกอินสำเร็จ กลับไปที่แอป Mooni ได้เลย — หน้าต่างนี้ปิดได้'));
       } else {
@@ -976,18 +980,18 @@ async function handleAuth(req, res, url, cors) {
 
     // ไม่ได้ตั้งบอท => เช็คยศสดไม่ได้ แต่ยังเช็ควันหมดอายุได้
     if (!D.botToken) {
-      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, mooni: !!payload.mooni, accessExp, reason: timeOk ? '' : 'expired', live: false });
+      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, candy: !!payload.candy, mooni: !!payload.mooni, accessExp, reason: timeOk ? '' : 'expired', live: false });
       return true;
     }
     const chk = await botCheckMember(uid);
     if (chk.error) {   // Discord ล่ม อย่าเพิ่งเตะออก
-      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, mooni: !!payload.mooni, accessExp, reason: timeOk ? '' : 'expired', live: false });
+      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, candy: !!payload.candy, mooni: !!payload.mooni, accessExp, reason: timeOk ? '' : 'expired', live: false });
       return true;
     }
     // ยังใช้แอปได้ถ้ายังมียศ Mooni หรือยศ Minecraft อย่างใดอย่างหนึ่ง
     const valid = (!!chk.mooni || !!chk.mc) && timeOk;
     const reason = (!chk.mooni && !chk.mc) ? 'no_role' : !timeOk ? 'expired' : '';
-    json(200, { valid, prime: !!chk.prime, mc: !!chk.mc, mooni: !!chk.mooni, accessExp, name: chk.name, live: true, reason });
+    json(200, { valid, prime: !!chk.prime, mc: !!chk.mc, candy: !!chk.candy, mooni: !!chk.mooni, accessExp, name: chk.name, live: true, reason });
     return true;
   }
 
@@ -997,7 +1001,7 @@ async function handleAuth(req, res, url, cors) {
     const rec = authResults.get(pair);
     if (!rec) { json(200, { status: 'unknown' }); return true; }
     if (rec.status === 'ok') {
-      json(200, { status: 'ok', name: rec.name, uid: rec.uid, avatar: rec.avatar || '', prime: !!rec.prime, mc: !!rec.mc, mooni: !!rec.mooni, accessExp: rec.accessExp || 0, token: rec.token, exp: rec.exp });
+      json(200, { status: 'ok', name: rec.name, uid: rec.uid, avatar: rec.avatar || '', prime: !!rec.prime, mc: !!rec.mc, candy: !!rec.candy, mooni: !!rec.mooni, accessExp: rec.accessExp || 0, token: rec.token, exp: rec.exp });
       authResults.delete(pair);   // ใช้ครั้งเดียว
     } else if (rec.status === 'denied') {
       json(200, { status: 'denied', reason: rec.reason, name: rec.name });
@@ -1263,7 +1267,7 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   </details>
 
   <div class="tablecard"><table><thead><tr>
-    <th>สมาชิก</th><th>Mooni</th><th>Pro</th><th>Minecraft</th><th>หมดอายุแอป</th>
+    <th>สมาชิก</th><th>Mooni</th><th>Pro</th><th>Minecraft</th><th>Candy Block</th><th>หมดอายุแอป</th>
   </tr></thead><tbody id="rows"></tbody></table></div>
 </div>
 <script>
@@ -1312,6 +1316,7 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
           '<div class="exp '+mec+'">'+(m.mc?met:'')+'</div>'+
           '<div class="setrow"><select class="dur mcdur">'+DUR+'</select>'+
           '<button class="btn mini mcgone">ถอด</button></div></td>'+
+        '<td><span class="tag tog '+(m.candy?'y':'')+'" data-role="candy">'+(m.candy?'มี ✓':'ไม่มี')+'</span></td>'+
         '<td><div class="exp '+ec+'">'+et+'</div>'+
           '<div class="setrow"><select class="dur">'+DUR+'</select>'+
           '<button class="btn mini gone">หมดอายุ</button></div></td></tr>';
@@ -1595,7 +1600,7 @@ async function handlePanel(pathname, data) {
   }
 
   if (pathname === '/panel/role') {
-    const roleId = data.role === 'prime' ? D.primeRoleId : data.role === 'mc' ? D.mcRoleId : D.roleId;
+    const roleId = data.role === 'prime' ? D.primeRoleId : data.role === 'mc' ? D.mcRoleId : data.role === 'candy' ? D.candyRoleId : D.roleId;
     if (!roleId) return { code: 400, body: { error: 'ยังไม่ได้ตั้งไอดียศนี้' } };
     const ok = await botSetRole(String(data.uid), roleId, !!data.on);
     // ถอดยศ Minecraft เอง = ล้างวันหมดอายุที่ตั้งไว้ด้วย (กันกวาดซ้ำ)
