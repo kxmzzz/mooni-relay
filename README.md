@@ -66,6 +66,7 @@
 | `DISCORD_GUILD_ID` | จากข้อ 2 |
 | `DISCORD_ROLE_ID` | จากข้อ 2 |
 | `DISCORD_CANDY_ROLE_ID` | ยศ Candy Block — ปลดล็อกการ์ด Candy Block ในหน้า Minecraft (ไม่ตั้ง = ใช้ไอดีเริ่มต้น) |
+| `DISCORD_FARMER_ROLE_ID` | ยศ Farmer — ปลดล็อกการ์ดแมพ Farmer ในหน้า Minecraft (ไม่ตั้ง = ใช้ไอดีเริ่มต้น) |
 | `DISCORD_INVITE` | ลิงก์ชวนเข้าเซิร์ฟเวอร์ (เช่น https://discord.gg/xxxx) |
 | `AUTH_SECRET` | สุ่มยาว ๆ (ถ้ายังไม่มี) |
 
