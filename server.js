@@ -949,8 +949,22 @@ async function handleAuth(req, res, url, cors) {
       if (check.ok) {
         const exp = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
         const accessExp = accessRec?.exp || 0;
-        const token = signSession({ uid: check.uid, name: check.name, prime: !!check.prime, mc: !!check.mc, candy: !!check.candy, farmer: !!check.farmer, mooni: !!check.mooni, exp });
-        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, avatar: check.avatar || '', prime: !!check.prime, mc: !!check.mc, candy: !!check.candy, farmer: !!check.farmer, mooni: !!check.mooni, accessExp, token, exp, at: Date.now() });
+        // เช็ควันหมดอายุของแต่ละยศ — หมดอายุแล้วถือว่าไม่มียศ
+        let roleExpMap = {};
+        if (STORE_ENABLED) roleExpMap = await getRoleExpMap();
+        const now = Date.now();
+        const roleExpired = (roleId) => {
+          if (!roleId) return false;
+          const roleExp = roleExpMap[`${check.uid}:${roleId}`];
+          return roleExp && roleExp <= now;
+        };
+        const mooniOk = !!check.mooni && !roleExpired(D.roleId);
+        const mcOk = !!check.mc && !roleExpired(D.mcRoleId);
+        const primeOk = !!check.prime && !roleExpired(D.primeRoleId);
+        const candyOk = !!check.candy && !roleExpired(D.candyRoleId);
+        const farmerOk = !!check.farmer && !roleExpired(D.farmerRoleId);
+        const token = signSession({ uid: check.uid, name: check.name, prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, mooni: mooniOk, exp });
+        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, avatar: check.avatar || '', prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, mooni: mooniOk, accessExp, token, exp, at: Date.now() });
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(resultPage(true, `ยินดีต้อนรับ ${check.name}!`, 'ล็อกอินสำเร็จ กลับไปที่แอป Mooni ได้เลย — หน้าต่างนี้ปิดได้'));
       } else {
@@ -992,10 +1006,24 @@ async function handleAuth(req, res, url, cors) {
       json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, candy: !!payload.candy, farmer: !!payload.farmer, mooni: !!payload.mooni, accessExp, reason: timeOk ? '' : 'expired', live: false });
       return true;
     }
+    // เช็ควันหมดอายุของแต่ละยศ — หมดอายุแล้วถือว่าไม่มียศ
+    let roleExpMap = {};
+    if (STORE_ENABLED) roleExpMap = await getRoleExpMap();
+    const now = Date.now();
+    const roleExpired = (roleId) => {
+      if (!roleId) return false;
+      const exp = roleExpMap[`${uid}:${roleId}`];
+      return exp && exp <= now;
+    };
+    const mooniOk = !!chk.mooni && !roleExpired(D.roleId);
+    const mcOk = !!chk.mc && !roleExpired(D.mcRoleId);
+    const primeOk = !!chk.prime && !roleExpired(D.primeRoleId);
+    const candyOk = !!chk.candy && !roleExpired(D.candyRoleId);
+    const farmerOk = !!chk.farmer && !roleExpired(D.farmerRoleId);
     // ยังใช้แอปได้ถ้ายังมียศ Mooni หรือยศ Minecraft อย่างใดอย่างหนึ่ง
-    const valid = (!!chk.mooni || !!chk.mc) && timeOk;
-    const reason = (!chk.mooni && !chk.mc) ? 'no_role' : !timeOk ? 'expired' : '';
-    json(200, { valid, prime: !!chk.prime, mc: !!chk.mc, candy: !!chk.candy, farmer: !!chk.farmer, mooni: !!chk.mooni, accessExp, name: chk.name, live: true, reason });
+    const valid = (mooniOk || mcOk) && timeOk;
+    const reason = (!mooniOk && !mcOk) ? 'no_role' : !timeOk ? 'expired' : '';
+    json(200, { valid, prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, mooni: mooniOk, accessExp, name: chk.name, live: true, reason });
     return true;
   }
 
@@ -1270,6 +1298,36 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     </div>
   </details>
 
+  <details class="rb">
+    <summary>🎮 แมพเกม — แก้ชื่อ, ราคา, รูป, Discord (แก้ได้ทันทีไม่ต้องอัพเดตแอพ)</summary>
+    <div class="rb-body">
+      <div class="rb-row">
+        <label>Discord Guild ID (เซิร์ฟเวอร์) <input id="mapDiscordGuild" placeholder="ใส่ Guild ID จาก Discord"></label>
+        <label>Discord Channel ID สำหรับปุ่ม BUY<input id="mapDiscordCh" placeholder="1484627407695511582"></label>
+      </div>
+      <div id="mapList"></div>
+      <hr style="border:none;border-top:2px solid #3a2030;margin:6px 0">
+      <b style="color:#ff7ab8;font-size:13px">➕ เพิ่ม/แก้แมพ</b>
+      <div class="rb-row">
+        <label>ID แมพ<input id="mpId" placeholder="เช่น farmer"></label>
+        <label>ชื่อแมพ<input id="mpName" placeholder="เช่น Mooni Farm"></label>
+      </div>
+      <div class="rb-row">
+        <label>ราคา<input id="mpPrice" placeholder="เช่น 219฿"></label>
+        <label>รูปแมพ<input id="mpImg" placeholder="เช่น farmer-card.png"></label>
+        <label>Emoji<input id="mpEmoji" placeholder="เช่น 🌾"></label>
+      </div>
+      <div class="rb-row">
+        <label>ยศที่ต้องมี<input id="mpRole" placeholder="เช่น farmer"></label>
+        <label style="max-width:100px;flex:none"><input type="checkbox" id="mpNew"> แสดงป้าย NEW</label>
+      </div>
+      <input type="hidden" id="mpEditId">
+      <button class="btn pink" id="mpSave">บันทึกแมพ</button>
+      <button class="btn" id="mpClear" style="background:#241823;color:#fff;box-shadow:none">ล้างฟอร์ม</button>
+      <div class="msg" id="mpMsg"></div>
+    </div>
+  </details>
+
   <div class="tablecard"><table><thead><tr>
     <th>สมาชิก</th><th>Mooni</th><th>Pro</th><th>Minecraft</th><th>Candy Block</th><th>Farmer</th><th>หมดอายุแอป</th>
   </tr></thead><tbody id="rows"></tbody></table></div>
@@ -1311,17 +1369,33 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     $('rows').innerHTML=list.map(m=>{
       const[et,ec]=fmtExp(m.exp);
       const[met,mec]=fmtExp(m.mcExp);
+      const[moet,moec]=fmtExp(m.mooniExp);
+      const[peo,pec]=fmtExp(m.primeExp);
+      const[ceo,cec]=fmtExp(m.candyExp);
+      const[feo,fec]=fmtExp(m.farmerExp);
       return '<tr data-uid="'+m.uid+'">'+
         '<td><div class="who"><div class="face" style="background-image:url(\\''+(m.avatar||'')+'\\')"></div>'+
           '<div><span class="dot '+(m.active?'on':'')+'"></span>'+esc(m.name)+'</div></div></td>'+
-        '<td><span class="tag tog '+(m.mooni?'y':'')+'" data-role="mooni">'+(m.mooni?'มี ✓':'ไม่มี')+'</span></td>'+
-        '<td><span class="tag tog '+(m.prime?'y':'')+'" data-role="prime">'+(m.prime?'มี ✓':'ไม่มี')+'</span></td>'+
+        '<td><span class="tag tog '+(m.mooni?'y':'')+'" data-role="mooni">'+(m.mooni?'มี ✓':'ไม่มี')+'</span>'+
+          '<div class="exp '+moec+'">'+(m.mooni?moet:'')+'</div>'+
+          '<div class="setrow"><select class="dur roledur" data-role="mooni">'+DUR+'</select>'+
+          '<button class="btn mini rolegone" data-role="mooni">ถอด</button></div></td>'+
+        '<td><span class="tag tog '+(m.prime?'y':'')+'" data-role="prime">'+(m.prime?'มี ✓':'ไม่มี')+'</span>'+
+          '<div class="exp '+pec+'">'+(m.prime?peo:'')+'</div>'+
+          '<div class="setrow"><select class="dur roledur" data-role="prime">'+DUR+'</select>'+
+          '<button class="btn mini rolegone" data-role="prime">ถอด</button></div></td>'+
         '<td><span class="tag tog '+(m.mc?'y':'')+'" data-role="mc">'+(m.mc?'มี ✓':'ไม่มี')+'</span>'+
           '<div class="exp '+mec+'">'+(m.mc?met:'')+'</div>'+
-          '<div class="setrow"><select class="dur mcdur">'+DUR+'</select>'+
-          '<button class="btn mini mcgone">ถอด</button></div></td>'+
-        '<td><span class="tag tog '+(m.candy?'y':'')+'" data-role="candy">'+(m.candy?'มี ✓':'ไม่มี')+'</span></td>'+
-        '<td><span class="tag tog '+(m.farmer?'y':'')+'" data-role="farmer">'+(m.farmer?'มี ✓':'ไม่มี')+'</span></td>'+
+          '<div class="setrow"><select class="dur roledur" data-role="mc">'+DUR+'</select>'+
+          '<button class="btn mini rolegone" data-role="mc">ถอด</button></div></td>'+
+        '<td><span class="tag tog '+(m.candy?'y':'')+'" data-role="candy">'+(m.candy?'มี ✓':'ไม่มี')+'</span>'+
+          '<div class="exp '+cec+'">'+(m.candy?ceo:'')+'</div>'+
+          '<div class="setrow"><select class="dur roledur" data-role="candy">'+DUR+'</select>'+
+          '<button class="btn mini rolegone" data-role="candy">ถอด</button></div></td>'+
+        '<td><span class="tag tog '+(m.farmer?'y':'')+'" data-role="farmer">'+(m.farmer?'มี ✓':'ไม่มี')+'</span>'+
+          '<div class="exp '+fec+'">'+(m.farmer?feo:'')+'</div>'+
+          '<div class="setrow"><select class="dur roledur" data-role="farmer">'+DUR+'</select>'+
+          '<button class="btn mini rolegone" data-role="farmer">ถอด</button></div></td>'+
         '<td><div class="exp '+ec+'">'+et+'</div>'+
           '<div class="setrow"><select class="dur">'+DUR+'</select>'+
           '<button class="btn mini gone">หมดอายุ</button></div></td></tr>';
@@ -1339,8 +1413,10 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
       if(e.target.classList.contains('tog')){
         const role=e.target.dataset.role,on=!e.target.classList.contains('y');
         e.target.textContent='...';await call('/panel/role',{uid,role,on});await load();
-      }else if(e.target.classList.contains('mcgone')){await call('/panel/mcexpiry',{uid,exp:Date.now()-1000});await load();}
-      else if(e.target.classList.contains('gone')){await call('/panel/expiry',{uid,exp:Date.now()-1000});await load();}
+      }else if(e.target.classList.contains('rolegone')){
+        const role=e.target.dataset.role;
+        await call('/panel/roleexpiry',{uid,role,exp:Date.now()-1000});await load();
+      }else if(e.target.classList.contains('gone')){await call('/panel/expiry',{uid,exp:Date.now()-1000});await load();}
     }catch(err){$('pmsg').textContent=err.message;}
   });
   // เลือกเวลาจากดรอปดาวน์เดียว แล้วตั้งเลยทันที
@@ -1348,8 +1424,11 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     if(!e.target.classList.contains('dur'))return;
     const tr=e.target.closest('tr');const uid=tr.dataset.uid,v=e.target.value;
     if(!v)return;
-    const path=e.target.classList.contains('mcdur')?'/panel/mcexpiry':'/panel/expiry';
-    try{await call(path,{uid,exp:v==='perm'?0:Date.now()+Number(v)});await load();}
+    const isRoleDur=e.target.classList.contains('roledur');
+    const path=isRoleDur?'/panel/roleexpiry':'/panel/expiry';
+    const body={uid,exp:v==='perm'?0:Date.now()+Number(v)};
+    if(isRoleDur) body.role=e.target.dataset.role;
+    try{await call(path,body);await load();}
     catch(err){$('pmsg').textContent=err.message;e.target.value='';}
   });
   // อ่านไฟล์รูปเป็น base64 (ใช้ร่วมกันทั้ง 2 ฟอร์ม)
@@ -1446,8 +1525,43 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   });
   $('enter').addEventListener('click',async()=>{
     KEY=$('key').value.trim();localStorage.setItem('mooniKey',KEY);
-    try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();loadShop();setInterval(load,15000);}
+    try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();loadShop();loadMaps();setInterval(load,15000);}
     catch(e){$('lmsg').textContent=e.message;}
+  });
+  /* ---- Maps config ---- */
+  let mapsData={maps:[],buyDiscordChannel:''};
+  async function loadMaps(){
+    try{const d=await call('/api/maps',{});mapsData=d;$('mapDiscordGuild').value=d.buyDiscordGuild||'';$('mapDiscordCh').value=d.buyDiscordChannel||'';renderMapList();}catch(e){$('mpMsg').style.color='#ff5a6a';$('mpMsg').textContent=e.message;}
+  }
+  function renderMapList(){
+    $('mapList').innerHTML=(mapsData.maps||[]).map(m=>
+      '<div style="display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid #221820">'+
+      (m.img?'<img src="/"+m.img+"" style="width:38px;height:38px;object-fit:cover;border:2px solid #3a2030">':'')+
+      '<div style="flex:1"><b>'+esc(m.name)+'</b> · '+esc(m.price||'')+(m.isNew?' <span style="color:#ff5a6a">(NEW)</span>':'')+(m.role?' <span style="color:#b58aa0">ยศ: '+esc(m.role)+'</span>':'')+'</div>'+
+      '<button class="btn mini" data-medit="'+m.id+'">แก้</button>'+
+      '<button class="btn mini" data-mdel="'+m.id+'" style="border-color:#6b2f3f">ลบ</button></div>').join('')||'<p style="color:#b58aa0;font-size:12px;margin-top:8px">ยังไม่มีแมพ</p>';
+  }
+  $('mapList').addEventListener('click',async e=>{
+    const ed=e.target.dataset.medit,del=e.target.dataset.mdel;
+    if(ed){const m=(mapsData.maps||[]).find(x=>x.id===ed);if(m){$('mpId').value=m.id;$('mpId').disabled=true;$('mpName').value=m.name||'';$('mpPrice').value=m.price||'';$('mpImg').value=m.img||'';$('mpEmoji').value=m.emoji||'';$('mpRole').value=m.role||'';$('mpNew').checked=!!m.isNew;$('mpEditId').value=m.id;$('mpName').scrollIntoView({behavior:'smooth'});}}
+    if(del&&confirm('ลบแมพนี้?')){try{await call('/api/maps/delete',{id:del});loadMaps();}catch(err){$('mpMsg').style.color='#ff5a6a';$('mpMsg').textContent=err.message;}}
+  });
+  $('mpSave').addEventListener('click',async()=>{
+    const id=$('mpEditId').value||$('mpId').value.trim();
+    if(!id){$('mpMsg').style.color='#ff5a6a';$('mpMsg').textContent='ต้องใส่ ID แมพ';return;}
+    const map={name:$('mpName').value.trim(),price:$('mpPrice').value.trim(),img:$('mpImg').value.trim(),emoji:$('mpEmoji').value.trim(),role:$('mpRole').value.trim(),isNew:$('mpNew').checked,overlays:[],downloads:[],commands:[]};
+    // ถ้าแก้ ให้เก่าของเดิมไว้
+    const old=(mapsData.maps||[]).find(m=>m.id===id);
+    if(old){map.overlays=old.overlays||[];map.downloads=old.downloads||[];map.commands=old.commands||[];}
+    try{await call('/api/maps/save',{id,map});$('mpMsg').style.color='#57d97e';$('mpMsg').textContent='✅ บันทึกแล้ว';clearMapForm();loadMaps();}catch(e){$('mpMsg').style.color='#ff5a6a';$('mpMsg').textContent=e.message;}
+  });
+  function clearMapForm(){$('mpId').value='';$('mpId').disabled=false;$('mpName').value='';$('mpPrice').value='';$('mpImg').value='';$('mpEmoji').value='';$('mpRole').value='';$('mpNew').checked=false;$('mpEditId').value='';}
+  $('mpClear').addEventListener('click',clearMapForm);
+  $('mapDiscordCh').addEventListener('change',async()=>{
+    try{mapsData.buyDiscordChannel=$('mapDiscordCh').value.trim();await call('/api/maps',{maps:mapsData.maps,buyDiscordGuild:mapsData.buyDiscordGuild,buyDiscordChannel:mapsData.buyDiscordChannel});}catch(e){}
+  });
+  $('mapDiscordGuild').addEventListener('change',async()=>{
+    try{mapsData.buyDiscordGuild=$('mapDiscordGuild').value.trim();await call('/api/maps',{maps:mapsData.maps,buyDiscordGuild:mapsData.buyDiscordGuild,buyDiscordChannel:mapsData.buyDiscordChannel});}catch(e){}
   });
   if(KEY){$('enter').click();}
 </script></body></html>`;
@@ -1593,10 +1707,15 @@ async function handlePanel(pathname, data) {
       STORE_ENABLED ? getRoleExpMap() : {},
     ]);
     const now = Date.now();
+    const roleIdMap = { mc: D.mcRoleId, mooni: D.roleId, prime: D.primeRoleId, candy: D.candyRoleId, farmer: D.farmerRoleId };
     const members = list.map((m) => ({
       ...m,
       exp: accessMap[m.uid]?.exp || 0,
-      mcExp: D.mcRoleId ? (roleExpMap[`${m.uid}:${D.mcRoleId}`] || 0) : 0,
+      mcExp: roleIdMap.mc ? (roleExpMap[`${m.uid}:${roleIdMap.mc}`] || 0) : 0,
+      mooniExp: roleIdMap.mooni ? (roleExpMap[`${m.uid}:${roleIdMap.mooni}`] || 0) : 0,
+      primeExp: roleIdMap.prime ? (roleExpMap[`${m.uid}:${roleIdMap.prime}`] || 0) : 0,
+      candyExp: roleIdMap.candy ? (roleExpMap[`${m.uid}:${roleIdMap.candy}`] || 0) : 0,
+      farmerExp: roleIdMap.farmer ? (roleExpMap[`${m.uid}:${roleIdMap.farmer}`] || 0) : 0,
       active: (now - (lastSeen.get(m.uid) || 0)) < ACTIVE_WINDOW,
     }));
     // เรียง: ออนไลน์ก่อน แล้วตามชื่อ
@@ -1608,16 +1727,20 @@ async function handlePanel(pathname, data) {
     const roleId = data.role === 'prime' ? D.primeRoleId : data.role === 'mc' ? D.mcRoleId : data.role === 'candy' ? D.candyRoleId : data.role === 'farmer' ? D.farmerRoleId : D.roleId;
     if (!roleId) return { code: 400, body: { error: 'ยังไม่ได้ตั้งไอดียศนี้' } };
     const ok = await botSetRole(String(data.uid), roleId, !!data.on);
-    // ถอดยศ Minecraft เอง = ล้างวันหมดอายุที่ตั้งไว้ด้วย (กันกวาดซ้ำ)
-    if (ok && data.role === 'mc' && !data.on && STORE_ENABLED) await delRoleExpiry(String(data.uid), roleId);
+    // ถอดยศ = ล้างวันหมดอายุที่ตั้งไว้ด้วย (กันกวาดซ้ำ)
+    if (ok && !data.on && STORE_ENABLED) await delRoleExpiry(String(data.uid), roleId);
     return { code: ok ? 200 : 500, body: ok ? { ok: true } : { error: 'บอทกดยศไม่สำเร็จ (เช็คสิทธิ์ Manage Roles + ลำดับยศ)' } };
   }
 
-  // ตั้ง/ล้างวันหมดอายุของยศ Minecraft (หมดแล้วบอทถอดยศเองตอนกวาดทุก 5 นาที)
-  if (pathname === '/panel/mcexpiry') {
+  // ตั้ง/ล้างวันหมดอายุของยศ (หมดแล้วบอทถอดยศเองตอนกวาดทุก 5 นาที)
+  // รองรับทั้ง mcexpiry (เดิม) และ roleexpiry (ใหม่ รองรับทุกยศ)
+  if (pathname === '/panel/mcexpiry' || pathname === '/panel/roleexpiry') {
     if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
-    const roleId = D.mcRoleId;
-    if (!roleId) return { code: 400, body: { error: 'ยังไม่ได้ตั้งไอดียศ Minecraft (DISCORD_MC_ROLE_ID)' } };
+    // หา roleId จาก role name หรือใช้ mcRoleId เดิม
+    const roleParam = data.role || 'mc';
+    const roleIdMap = { mc: D.mcRoleId, mooni: D.roleId, prime: D.primeRoleId, candy: D.candyRoleId, farmer: D.farmerRoleId };
+    const roleId = roleIdMap[roleParam];
+    if (!roleId) return { code: 400, body: { error: 'ยังไม่ได้ตั้งไอดียศ ' + roleParam } };
     const uid = String(data.uid);
     const exp = Number(data.exp) || 0;
     const now = Date.now();
