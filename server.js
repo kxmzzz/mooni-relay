@@ -36,6 +36,7 @@ const D = {
   candyRoleId: process.env.DISCORD_CANDY_ROLE_ID || '1533367941691867236',   // ยศ Candy Block (ปลดล็อกการ์ด Candy Block ในหน้า Minecraft)
   farmerRoleId: process.env.DISCORD_FARMER_ROLE_ID || '1538127407096270929',   // ยศ Farmer (ปลดล็อกการ์ดแมพ Farmer ในหน้า Minecraft)
   diamondRoleId: process.env.DISCORD_DIAMOND_ROLE_ID || '1541417750927376475',   // ยศ Diamond (ปลดล็อกการ์ด Mooni Diamond ในหน้า Minecraft)
+  parkourRoleId: process.env.DISCORD_PARKOUR_ROLE_ID || '1550867888531968170',   // ยศ Parkour (ปลดล็อกการ์ด Parkour V1 ในหน้า Minecraft)
   botToken: process.env.DISCORD_BOT_TOKEN || '',          // โทเคนบอท — ใช้เช็คยศสดแบบเรียลไทม์ (ถอดยศแล้วรู้ทันที)
   publicKey: process.env.DISCORD_PUBLIC_KEY || '',        // Public Key ของแอป — ใช้ตรวจลายเซ็นปุ่มกดจาก Discord
   invite: process.env.DISCORD_INVITE || '',
@@ -143,6 +144,7 @@ async function botListMembers() {
       candy: D.candyRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.candyRoleId)) : false,
       farmer: D.farmerRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.farmerRoleId)) : false,
       diamond: D.diamondRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.diamondRoleId)) : false,
+      parkour: D.parkourRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.parkourRoleId)) : false,
     }));
   } catch { return []; }
 }
@@ -577,6 +579,19 @@ async function getRoleExpMap() {
   return map;
 }
 
+/** วันหมดอายุของยศทั้งหมดของผู้ใช้ → map ตามชื่อยศ → เวลา ms (0 = ถาวร/ไม่มีข้อมูล) */
+function roleExpOf(uid, D, roleExpMap) {
+  return {
+    mc: roleExpMap[`${uid}:${D.mcRoleId}`] || 0,
+    mooni: roleExpMap[`${uid}:${D.roleId}`] || 0,
+    prime: roleExpMap[`${uid}:${D.primeRoleId}`] || 0,
+    candy: roleExpMap[`${uid}:${D.candyRoleId}`] || 0,
+    farmer: roleExpMap[`${uid}:${D.farmerRoleId}`] || 0,
+    diamond: roleExpMap[`${uid}:${D.diamondRoleId}`] || 0,
+    parkour: roleExpMap[`${uid}:${D.parkourRoleId}`] || 0,
+  };
+}
+
 async function sweepRoleExpiry() {
   if (!STORE_ENABLED || !D.botToken) return;
   const d = await upstash(['HGETALL', 'mooni:roleexp']);
@@ -794,9 +809,9 @@ function resultPage(ok, title, detail) {
 <style>*{margin:0;padding:0;box-sizing:border-box}body{min-height:100vh;display:flex;align-items:center;
 justify-content:center;padding:20px;font-family:system-ui,'Segoe UI','Noto Sans Thai',sans-serif;color:#fdeef5;
 background:radial-gradient(700px 400px at 50% -10%,rgba(255,122,184,.14),transparent 60%),#0a0a0c;text-align:center}
-.card{max-width:420px;padding:30px;background:#17141b;border:2px solid #3a2030;box-shadow:6px 6px 0 #000}
-.icon{font-size:46px;margin-bottom:10px}h1{font-size:20px;color:${ok ? '#7ee0a6' : '#ff5a6a'};margin-bottom:10px}
-p{font-size:14px;color:#b58aa0;line-height:1.6}</style></head><body><div class="card">
+.card{max-width:420px;padding:30px;background:#17141b;border:2px solid rgba(255,255,255,.14);box-shadow:6px 6px 0 #000}
+.icon{font-size:46px;margin-bottom:10px}h1{font-size:20px;color:${ok ? '#7ee0a6' : '#ff6b7f'};margin-bottom:10px}
+p{font-size:14px;color:#8ea6cc;line-height:1.6}</style></head><body><div class="card">
 <div class="icon">${ok ? '✅' : '🔒'}</div><h1>${title}</h1><p>${detail}</p></div></body></html>`;
 }
 
@@ -824,10 +839,11 @@ async function checkDiscordMember(accessToken) {
   const candy = D.candyRoleId ? roles.includes(D.candyRoleId) : false;   // ยศ Candy Block (ปลดล็อกการ์ด Candy Block)
   const farmer = D.farmerRoleId ? roles.includes(D.farmerRoleId) : false;   // ยศ Farmer (ปลดล็อกการ์ดแมพ Farmer)
   const diamond = D.diamondRoleId ? roles.includes(D.diamondRoleId) : false;   // ยศ Diamond (ปลดล็อกการ์ด Mooni Diamond)
+  const parkour = D.parkourRoleId ? roles.includes(D.parkourRoleId) : false;   // ยศ Parkour (ปลดล็อกการ์ด Parkour V1)
   const mooni = roles.includes(D.roleId);                        // ยศ Mooni (เข้าแอปได้เต็มทุกหน้า)
   // เข้าแอปได้ถ้ามียศ Mooni "หรือ" ยศ Minecraft — คนที่มีแค่ mc จะเข้าได้เฉพาะหน้า Minecraft
   const allowed = mooni || mc;
-  return allowed ? { ok: true, name, uid, avatar, prime, mc, candy, farmer, diamond, mooni, roles } : { ok: false, reason: 'no_role', name, uid };
+  return allowed ? { ok: true, name, uid, avatar, prime, mc, candy, farmer, diamond, parkour, mooni, roles } : { ok: false, reason: 'no_role', name, uid };
 }
 
 /** ใช้บอทเช็คยศปัจจุบันของสมาชิก (เรียลไทม์ — ถอดยศแล้วรู้เลย) */
@@ -848,6 +864,7 @@ async function botCheckMember(uid) {
       candy: D.candyRoleId ? roles.includes(D.candyRoleId) : false,
       farmer: D.farmerRoleId ? roles.includes(D.farmerRoleId) : false,
       diamond: D.diamondRoleId ? roles.includes(D.diamondRoleId) : false,
+      parkour: D.parkourRoleId ? roles.includes(D.parkourRoleId) : false,
       name: m.nick || m.user?.global_name || m.user?.username || '',
       roles,
     };
@@ -969,8 +986,11 @@ async function handleAuth(req, res, url, cors) {
         const candyOk = !!check.candy && !roleExpired(D.candyRoleId);
         const farmerOk = !!check.farmer && !roleExpired(D.farmerRoleId);
         const diamondOk = !!check.diamond && !roleExpired(D.diamondRoleId);
-        const token = signSession({ uid: check.uid, name: check.name, prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, mooni: mooniOk, exp });
-        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, avatar: check.avatar || '', prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, mooni: mooniOk, accessExp, token, exp, at: Date.now(), roles: check.roles || [] });
+        const parkourOk = !!check.parkour && !roleExpired(D.parkourRoleId);
+        // ส่งวันหมดอายุของแต่ละยศกลับไปด้วย — แอปเอาไปโชว์บนการ์ดแมพ (เหลืออีกกี่วัน)
+        const roleExp = roleExpOf(check.uid, D, roleExpMap);
+        const token = signSession({ uid: check.uid, name: check.name, prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, parkour: parkourOk, mooni: mooniOk, exp });
+        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, avatar: check.avatar || '', prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, parkour: parkourOk, mooni: mooniOk, accessExp, token, exp, roleExp, at: Date.now(), roles: check.roles || [] });
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(resultPage(true, `ยินดีต้อนรับ ${check.name}!`, 'ล็อกอินสำเร็จ กลับไปที่แอป Mooni ได้เลย — หน้าต่างนี้ปิดได้'));
       } else {
@@ -1004,12 +1024,12 @@ async function handleAuth(req, res, url, cors) {
 
     // ไม่ได้ตั้งบอท => เช็คยศสดไม่ได้ แต่ยังเช็ควันหมดอายุได้
     if (!D.botToken) {
-      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, candy: !!payload.candy, farmer: !!payload.farmer, diamond: !!payload.diamond, mooni: !!payload.mooni, accessExp, reason: timeOk ? '' : 'expired', live: false, roles: [] });
+      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, candy: !!payload.candy, farmer: !!payload.farmer, diamond: !!payload.diamond, parkour: !!payload.parkour, mooni: !!payload.mooni, accessExp, reason: timeOk ? '' : 'expired', live: false, roleExp: {}, roles: [] });
       return true;
     }
     const chk = await botCheckMember(uid);
     if (chk.error) {   // Discord ล่ม อย่าเพิ่งเตะออก
-      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, candy: !!payload.candy, farmer: !!payload.farmer, diamond: !!payload.diamond, mooni: !!payload.mooni, accessExp, reason: timeOk ? '' : 'expired', live: false, roles: [] });
+      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, candy: !!payload.candy, farmer: !!payload.farmer, diamond: !!payload.diamond, parkour: !!payload.parkour, mooni: !!payload.mooni, accessExp, reason: timeOk ? '' : 'expired', live: false, roleExp: {}, roles: [] });
       return true;
     }
     // เช็ควันหมดอายุของแต่ละยศ — หมดอายุแล้วถือว่าไม่มียศ
@@ -1027,10 +1047,11 @@ async function handleAuth(req, res, url, cors) {
     const candyOk = !!chk.candy && !roleExpired(D.candyRoleId);
     const farmerOk = !!chk.farmer && !roleExpired(D.farmerRoleId);
     const diamondOk = !!chk.diamond && !roleExpired(D.diamondRoleId);
+    const parkourOk = !!chk.parkour && !roleExpired(D.parkourRoleId);
     // ยังใช้แอปได้ถ้ายังมียศ Mooni หรือยศ Minecraft อย่างใดอย่างหนึ่ง
     const valid = (mooniOk || mcOk) && timeOk;
     const reason = (!mooniOk && !mcOk) ? 'no_role' : !timeOk ? 'expired' : '';
-    json(200, { valid, prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, mooni: mooniOk, accessExp, name: chk.name, live: true, reason, roles: chk.roles || [] });
+    json(200, { valid, prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, parkour: parkourOk, mooni: mooniOk, accessExp, name: chk.name, live: true, reason, roleExp: roleExpOf(uid, D, roleExpMap), roles: chk.roles || [] });
     return true;
   }
 
@@ -1040,7 +1061,7 @@ async function handleAuth(req, res, url, cors) {
     const rec = authResults.get(pair);
     if (!rec) { json(200, { status: 'unknown' }); return true; }
     if (rec.status === 'ok') {
-      json(200, { status: 'ok', name: rec.name, uid: rec.uid, avatar: rec.avatar || '', prime: !!rec.prime, mc: !!rec.mc, candy: !!rec.candy, farmer: !!rec.farmer, diamond: !!rec.diamond, mooni: !!rec.mooni, accessExp: rec.accessExp || 0, token: rec.token, exp: rec.exp, roles: rec.roles || [] });
+      json(200, { status: 'ok', name: rec.name, uid: rec.uid, avatar: rec.avatar || '', prime: !!rec.prime, mc: !!rec.mc, candy: !!rec.candy, farmer: !!rec.farmer, diamond: !!rec.diamond, parkour: !!rec.parkour, mooni: !!rec.mooni, accessExp: rec.accessExp || 0, token: rec.token, exp: rec.exp, roleExp: rec.roleExp || {}, roles: rec.roles || [] });
       authResults.delete(pair);   // ใช้ครั้งเดียว
     } else if (rec.status === 'denied') {
       json(200, { status: 'denied', reason: rec.reason, name: rec.name });
@@ -1062,14 +1083,14 @@ const ADMIN_HTML = `<!DOCTYPE html><html lang="th"><head>
   body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
     font-family:system-ui,'Segoe UI','Leelawadee UI','Noto Sans Thai',sans-serif;color:#fdeef5;
     background:radial-gradient(700px 400px at 50% -10%,rgba(255,122,184,.14),transparent 60%),#0a0a0c}
-  .card{width:100%;max-width:460px;padding:26px;background:#17141b;border:2px solid #3a2030;box-shadow:6px 6px 0 #000}
+  .card{width:100%;max-width:460px;padding:26px;background:#17141b;border:2px solid rgba(255,255,255,.14);box-shadow:6px 6px 0 #000}
   h1{font-size:19px;font-weight:800;margin-bottom:4px;color:#ff7ab8}
-  p.sub{font-size:13px;color:#b58aa0;margin-bottom:18px}
-  label{display:block;font-size:12.5px;font-weight:600;color:#b58aa0;margin:14px 0 8px}
-  input,textarea{width:100%;padding:12px 14px;background:#0a0a0c;color:#fdeef5;border:2px solid #3a2030;font:inherit;font-size:15px}
+  p.sub{font-size:13px;color:#8ea6cc;margin-bottom:18px}
+  label{display:block;font-size:12.5px;font-weight:600;color:#8ea6cc;margin:14px 0 8px}
+  input,textarea{width:100%;padding:12px 14px;background:#0a0a0c;color:#fdeef5;border:2px solid rgba(255,255,255,.14);font:inherit;font-size:15px}
   textarea{min-height:96px;resize:vertical}
   input:focus,textarea:focus{outline:none;border-color:#ff7ab8}
-  .count{text-align:right;font-size:11.5px;color:#b58aa0;margin-top:6px}
+  .count{text-align:right;font-size:11.5px;color:#8ea6cc;margin-top:6px}
   button{width:100%;margin-top:16px;padding:14px;background:linear-gradient(100deg,#d64f92,#ff7ab8);
     color:#2a0f1c;border:2px solid #000;box-shadow:3px 3px 0 #000;font:inherit;font-size:16px;font-weight:800;cursor:pointer;
     transition:transform .08s,box-shadow .08s}
@@ -1077,8 +1098,8 @@ const ADMIN_HTML = `<!DOCTYPE html><html lang="th"><head>
   button:active{transform:translate(2px,2px);box-shadow:0 0 0 #000}
   button:disabled{opacity:.5;cursor:default}
   .status{margin-top:14px;font-size:13px;text-align:center;min-height:20px}
-  .status.ok{color:#ff7ab8}.status.err{color:#ff5a6a}
-  .online{margin-top:10px;font-size:12px;color:#b58aa0;text-align:center}
+  .status.ok{color:#ff7ab8}.status.err{color:#ff6b7f}
+  .online{margin-top:10px;font-size:12px;color:#8ea6cc;text-align:center}
 </style></head><body>
 <div class="card">
   <h1>📢 ส่งประกาศถึงทุกคน</h1>
@@ -1130,19 +1151,21 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   :root{
-    --bg:#0c0a11;--card:rgba(255,255,255,.038);--card2:rgba(255,255,255,.06);
-    --line:rgba(255,255,255,.09);--line2:rgba(255,255,255,.16);
-    --text:#f5eef4;--muted:#a596ac;--accent:#ff7ab8;--accent2:#c07bff;
-    --green:#5fe0a0;--gold:#ffd36e;--red:#ff6b81;--blue:#7ab8ff;
-    --grad:linear-gradient(135deg,#ff8fc7,#c07bff);
+    --bg:#050a17;--card:rgba(255,255,255,.04);--card2:rgba(255,255,255,.07);
+    --line:rgba(255,255,255,.1);--line2:rgba(255,255,255,.18);
+    --text:#e9f1ff;--muted:#8aa0c6;--accent:#4c8dff;--accent2:#22d3ee;
+    --green:#3ddc97;--gold:#ffcf6b;--red:#ff6b7f;--blue:#5fb0ff;
+    --ink:#04101f;
+    --grad:linear-gradient(135deg,#4c8dff,#22d3ee);
   }
   html{-webkit-text-size-adjust:100%}
   body{min-height:100vh;padding:30px 18px;color:var(--text);
     font-family:'Anuphan','Noto Sans Thai',system-ui,'Segoe UI',sans-serif;
     font-size:14px;line-height:1.55;letter-spacing:.1px;
     background:
-      radial-gradient(950px 520px at 12% -12%,rgba(255,122,184,.18),transparent 55%),
-      radial-gradient(820px 520px at 100% -4%,rgba(192,123,255,.15),transparent 55%),
+      radial-gradient(900px 500px at 10% -14%,rgba(76,141,255,.20),transparent 58%),
+      radial-gradient(780px 480px at 102% -6%,rgba(34,211,238,.15),transparent 58%),
+      radial-gradient(1000px 720px at 50% 118%,rgba(59,130,246,.10),transparent 62%),
       var(--bg);
     background-attachment:fixed}
   .wrap{max-width:1060px;margin:0 auto}
@@ -1155,38 +1178,17 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     transition:border-color .15s,box-shadow .15s,background .15s}
   input::placeholder,textarea::placeholder{color:#7d7183}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
-    box-shadow:0 0 0 3px rgba(255,122,184,.16);background:rgba(0,0,0,.38)}
+    box-shadow:0 0 0 3px rgba(76,141,255,.2);background:rgba(0,0,0,.42)}
   select{cursor:pointer}
   .btn{padding:10px 16px;background:var(--card2);color:var(--text);border:1.5px solid var(--line);
     border-radius:12px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;
     transition:transform .12s,border-color .15s,background .15s,box-shadow .15s}
   .btn:hover{border-color:var(--line2);background:rgba(255,255,255,.09)}
   .btn:active{transform:translateY(1px)}
-  .btn.pink{background:var(--grad);color:#25091a;border:none;font-weight:700;
-    box-shadow:0 8px 20px -8px rgba(255,122,184,.65)}
-  .btn.pink:hover{box-shadow:0 10px 26px -8px rgba(255,122,184,.8)}
-  .tablecard{background:var(--card);border:1.5px solid var(--line);border-radius:18px;
-    overflow-x:auto;overflow-y:hidden;backdrop-filter:blur(10px);box-shadow:0 20px 60px -34px rgba(0,0,0,.85)}
-  table{width:100%;border-collapse:collapse;font-size:13px;min-width:600px}
-  th{text-align:left;color:var(--muted);font-size:11px;font-weight:600;padding:14px;
-    border-bottom:1.5px solid var(--line);text-transform:uppercase;letter-spacing:.6px;
-    background:rgba(255,255,255,.022)}
-  td{padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
-  tbody tr:last-child td{border-bottom:none}
-  tr:hover td{background:rgba(255,122,184,.05)}
-  .who{display:flex;align-items:center;gap:10px}
-  .face{width:34px;height:34px;border-radius:50%;background:#241826 center/cover;border:2px solid var(--line2);flex:none}
-  .dot{width:8px;height:8px;border-radius:50%;background:#4a4152;display:inline-block;margin-right:6px;vertical-align:middle}
-  .dot.on{background:var(--green);box-shadow:0 0 0 3px rgba(95,224,160,.2)}
-  .tag{display:inline-block;padding:4px 12px;font-size:11px;font-weight:600;
-    border:1.5px solid var(--line);border-radius:999px;color:var(--muted);background:rgba(255,255,255,.025)}
-  .tag.y{color:#0e2a1c;background:linear-gradient(135deg,#7fe6b0,#5fe0a0);border-color:transparent;font-weight:700}
-  .tog{cursor:pointer;user-select:none;transition:transform .12s,filter .12s}
-  .tog:hover{transform:translateY(-1px);filter:brightness(1.08)}
-  .exp{font-size:11.5px;color:var(--gold);margin-top:5px}
-  .exp.perm{color:var(--blue)}.exp.gone{color:var(--red)}
-  .setrow{display:flex;gap:6px;align-items:center;margin-top:7px}
-  .setrow select.dur{min-width:134px;padding:7px 11px;border-radius:10px;font-size:12px}
+  .btn.pink{background:var(--grad);color:var(--ink);border:none;font-weight:700;
+    box-shadow:0 10px 24px -12px rgba(76,141,255,.95)}
+  .btn.pink:hover{box-shadow:0 12px 30px -12px rgba(34,211,238,.95);filter:brightness(1.06)}
+  .face{width:34px;height:34px;border-radius:50%;background:#0f1c33 center/cover;border:2px solid var(--line2);flex:none}
   .mini{padding:7px 12px;font-size:11.5px;border-radius:10px}
   #login{max-width:360px;margin:12vh auto 0;padding:32px 28px;background:var(--card);
     border:1.5px solid var(--line);border-radius:22px;backdrop-filter:blur(12px);
@@ -1215,6 +1217,101 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   ::-webkit-scrollbar{height:9px;width:9px}
   ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:999px}
   ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.24)}
+  /* ===== ธีมฟ้า: แท็บ · การ์ดสมาชิก · หน้าต่างตั้งค่า ===== */
+  .top{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+  h1{font-size:26px}
+  h1 span{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .count b{color:#fff}
+  .count .on{color:var(--green)}
+  .seg{display:flex;gap:6px;flex-wrap:wrap;background:rgba(255,255,255,.035);border:1.5px solid var(--line);
+    border-radius:16px;padding:6px;margin-bottom:18px;backdrop-filter:blur(12px);position:sticky;top:12px;z-index:20}
+  .seg button{flex:1 1 0;min-width:120px;padding:10px 12px;border:none;border-radius:11px;background:transparent;
+    color:var(--muted);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
+  .seg button:hover{color:var(--text);background:rgba(255,255,255,.06)}
+  .seg button.on{background:var(--grad);color:var(--ink);font-weight:700;box-shadow:0 10px 24px -12px rgba(76,141,255,.95)}
+  .pane{display:none}
+  .pane.on{display:block;animation:fadein .2s ease}
+  @keyframes fadein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+  .mcard{position:relative;overflow:hidden;background:var(--card);border:1.5px solid var(--line);border-radius:18px;
+    padding:14px;cursor:pointer;backdrop-filter:blur(10px);transition:transform .14s,border-color .16s,box-shadow .16s}
+  .mcard::after{content:'';position:absolute;right:-40px;bottom:-60px;width:150px;height:150px;
+    background:radial-gradient(circle,rgba(76,141,255,.3),transparent 70%);opacity:0;transition:opacity .2s}
+  .mcard:hover{transform:translateY(-3px);border-color:rgba(76,141,255,.55);box-shadow:0 22px 44px -26px rgba(76,141,255,.85)}
+  .mcard:hover::after{opacity:1}
+  .mhead{display:flex;align-items:center;gap:11px}
+  .mwho{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+  .mwho b{max-width:100%;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .badge{font-size:10.5px;font-weight:700;letter-spacing:.3px;padding:2px 9px;border-radius:999px;
+    border:1.5px solid var(--line2);color:var(--muted)}
+  .badge.live{color:#04211a;background:linear-gradient(135deg,#7ff0bb,#3ddc97);border-color:transparent}
+  .gear{color:var(--muted);font-size:15px;transition:transform .18s,color .18s}
+  .mcard:hover .gear{color:var(--accent);transform:rotate(45deg)}
+  .mpills{position:relative;display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+  .pill{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:9px;font-size:11.5px;
+    font-weight:600;background:rgba(255,255,255,.05);border:1.5px solid var(--line)}
+  .pill i{font-style:normal;font-size:10.5px;font-weight:500;color:var(--muted)}
+  .pill.ok{background:rgba(61,220,151,.13);border-color:rgba(61,220,151,.35)}
+  .pill.blue{background:rgba(76,141,255,.15);border-color:rgba(76,141,255,.4)}
+  .pill.danger{background:rgba(255,107,127,.13);border-color:rgba(255,107,127,.4)}
+  .pill.none{color:var(--muted)}
+  .empty{grid-column:1/-1;padding:40px;text-align:center;color:var(--muted);
+    border:1.5px dashed var(--line);border-radius:18px}
+  /* หน้าต่างตั้งค่าสมาชิก */
+  .modal{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;
+    background:rgba(3,7,18,.74);backdrop-filter:blur(7px)}
+  .modal.hidden{display:none}
+  .sheet{width:100%;max-width:660px;max-height:88vh;overflow-y:auto;padding:20px;border-radius:24px;
+    background:linear-gradient(180deg,#0d1730,#080e1e);border:1.5px solid rgba(76,141,255,.3);
+    box-shadow:0 40px 100px -40px rgba(0,0,0,.95);animation:pop .2s ease}
+  @keyframes pop{from{opacity:0;transform:translateY(16px) scale(.98)}to{opacity:1;transform:none}}
+  .shead{display:flex;align-items:center;gap:12px;padding-bottom:14px;border-bottom:1.5px solid var(--line)}
+  .shead .face{width:46px;height:46px}
+  .shead .swho{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+  .shead b{max-width:100%;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .x{width:34px;height:34px;flex:none;border-radius:11px;cursor:pointer;font-size:14px;
+    background:rgba(255,255,255,.06);border:1.5px solid var(--line);color:var(--text)}
+  .x:hover{border-color:var(--red);color:var(--red)}
+  .hint{margin:12px 0;font-size:12px;color:var(--muted)}
+  .sblock{display:flex;flex-direction:column;gap:8px}
+  .sblock+.sblock{margin-top:14px;padding-top:14px;border-top:1.5px dashed var(--line)}
+  .srow{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px 12px;
+    padding:11px 13px;border-radius:15px;background:rgba(255,255,255,.032);border:1.5px solid var(--line)}
+  .sw{position:relative;width:42px;height:23px;flex:none;border-radius:999px;cursor:pointer;
+    background:rgba(255,255,255,.1);border:1.5px solid var(--line2)}
+  .sw i{position:absolute;top:2.5px;left:3px;width:15px;height:15px;border-radius:50%;background:#7d8fb0;transition:.18s}
+  .sw.on{background:var(--grad);border-color:transparent}
+  .sw.on i{left:22px;background:var(--ink)}
+  .sw.busy{opacity:.5}
+  .appico{width:42px;flex:none;text-align:center;font-size:17px}
+  .sinfo{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+  .sinfo b{font-size:13.5px}
+  .st{font-size:11.5px;color:var(--muted)}
+  .st.ok{color:var(--green)}.st.perm{color:var(--blue)}.st.gone{color:var(--red)}
+  .schips{display:flex;grid-column:1/-1;flex-wrap:wrap;gap:6px}
+  .chip{padding:6px 11px;font:inherit;font-size:11.5px;font-weight:600;border-radius:9px;cursor:pointer;
+    background:rgba(255,255,255,.05);border:1.5px solid var(--line);color:var(--text);transition:.14s}
+  .chip:hover{border-color:var(--accent);background:rgba(76,141,255,.18)}
+  .chip.ghost{border-style:dashed;color:var(--muted)}
+  .chip.ok{background:var(--grad);color:var(--ink);border-color:transparent}
+  .chip.del:hover{border-color:var(--red);background:rgba(255,107,127,.16);color:#ffd9de}
+  .crow{display:flex;grid-column:1/-1;align-items:center;gap:6px;flex-wrap:wrap}
+  .crow.hidden{display:none}
+  .crow input{width:82px;padding:7px 10px;font-size:12px;border-radius:9px}
+  .crow select{padding:7px 10px;font-size:12px;border-radius:9px}
+  .sfoot{display:flex;justify-content:flex-end;margin-top:18px}
+  .subttl{display:block;margin:2px 0 10px;color:var(--accent);font-size:13px}
+  input[type=file]{padding:9px 12px;color:var(--muted);cursor:pointer}
+  input[type=file]::file-selector-button{margin-right:10px;padding:7px 14px;border-radius:9px;cursor:pointer;
+    background:rgba(76,141,255,.18);border:1.5px solid rgba(76,141,255,.45);color:var(--text);font:inherit;font-size:12px;font-weight:600}
+  input[type=file]::file-selector-button:hover{background:rgba(76,141,255,.3)}
+  .divider{border:none;border-top:1.5px solid var(--line);margin:14px 0}
+  .toast{position:fixed;left:50%;bottom:26px;z-index:80;padding:11px 20px;border-radius:14px;
+    font-size:13px;font-weight:600;color:#fff;opacity:0;pointer-events:none;transform:translate(-50%,18px);
+    background:rgba(13,23,48,.96);border:1.5px solid rgba(76,141,255,.55);transition:.22s}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+  .toast.bad{border-color:rgba(255,107,127,.65)}
+  @media(max-width:560px){.seg button{min-width:0;flex:1 1 44%}.sheet{padding:16px;border-radius:20px}}
 </style></head><body>
 <div id="login">
   <h1>🔑 เข้าหน้าจัดการ</h1>
@@ -1223,15 +1320,31 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   <div class="msg" id="lmsg"></div>
 </div>
 <div class="wrap hidden" id="panel">
-  <h1>👥 จัดการสมาชิก Mooni</h1>
-  <p class="sub">กดยศ Mooni / Pro / Minecraft และตั้งวันหมดอายุได้เลย · ยศ Minecraft หมดอายุ = บอทถอดยศเอง · จุดเขียว = กำลังใช้งานอยู่</p>
-  <div class="bar">
-    <input id="search" placeholder="ค้นหาชื่อ…" style="flex:1;min-width:160px">
+  <header class="top">
+    <div>
+      <h1>จัดการสมาชิก <span>Mooni</span></h1>
+      <p class="sub" style="margin:7px 0 0">แตะการ์ดสมาชิกเพื่อเปิดหน้าต่างจัดการยศและเวลา · ⚡ ออนไลน์ = กำลังใช้งานอยู่</p>
+    </div>
     <span class="count" id="count"></span>
-    <button class="btn" id="refresh">รีเฟรช</button>
-  </div>
-  <div class="msg" id="pmsg"></div>
+  </header>
 
+  <nav class="seg" id="seg">
+    <button class="on" data-tab="members">👥 สมาชิก</button>
+    <button data-tab="give">🎁 ปุ่ม Discord</button>
+    <button data-tab="shop">🛒 ร้านค้า</button>
+    <button data-tab="maps">🎮 แมพเกม</button>
+  </nav>
+
+  <section class="pane on" data-pane="members">
+    <div class="bar">
+      <input id="search" placeholder="🔎 ค้นหาชื่อสมาชิก…" style="flex:1;min-width:170px">
+      <button class="btn" id="refresh">↻ รีเฟรช</button>
+    </div>
+    <div class="msg" id="pmsg"></div>
+    <div class="cards" id="cards"></div>
+  </section>
+
+  <section class="pane" data-pane="give">
   <details class="rb">
     <summary>🎁 ส่งปุ่มรับยศเข้า Discord</summary>
     <div class="rb-body">
@@ -1268,9 +1381,11 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
       <div class="msg" id="tkMsg"></div>
     </div>
   </details>
+  </section>
 
+  <section class="pane" data-pane="shop">
   <details class="rb">
-    <summary>🛒 ร้านค้า — ตั้งค่า + สินค้า (เปิดหน้าร้าน <a href="/shop" target="_blank" style="color:#8ec9ff">/shop</a>)</summary>
+    <summary>🛒 ร้านค้า — ตั้งค่า + สินค้า <a href="/shop" target="_blank">เปิดหน้าร้าน /shop</a></summary>
     <div class="rb-body">
       <div class="rb-row">
         <label>ชื่อร้าน<input id="shName" placeholder="Mooni Shop"></label>
@@ -1285,8 +1400,8 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
       <button class="btn pink" id="shSaveSettings">บันทึกตั้งค่าร้าน</button>
       <div class="msg" id="shSetMsg"></div>
 
-      <hr style="border:none;border-top:2px solid #3a2030;margin:6px 0">
-      <b style="color:#ff7ab8;font-size:13px">➕ เพิ่ม/แก้สินค้า</b>
+      <hr class="divider">
+      <b class="subttl">➕ เพิ่ม/แก้สินค้า</b>
       <label>ชื่อสินค้า<input id="pName" placeholder="เช่น ยศ VIP"></label>
       <div class="rb-row">
         <label style="max-width:150px">ราคา 30 วัน (บาท)<input id="pPrice30" type="number" min="0" value="0"></label>
@@ -1299,12 +1414,14 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
       </div>
       <input type="hidden" id="pId">
       <button class="btn pink" id="pSave">บันทึกสินค้า</button>
-      <button class="btn" id="pClear" style="background:#241823;color:#fff;box-shadow:none">ล้างฟอร์ม</button>
+      <button class="btn" id="pClear">ล้างฟอร์ม</button>
       <div class="msg" id="pMsg2"></div>
       <div id="pList"></div>
     </div>
   </details>
+  </section>
 
+  <section class="pane" data-pane="maps">
   <details class="rb">
     <summary>🎮 แมพเกม — แก้ชื่อ, ราคา, รูป, Discord (แก้ได้ทันทีไม่ต้องอัพเดตแอพ)</summary>
     <div class="rb-body">
@@ -1313,8 +1430,8 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
         <label>Discord Channel ID สำหรับปุ่ม BUY<input id="mapDiscordCh" placeholder="1484627407695511582"></label>
       </div>
       <div id="mapList"></div>
-      <hr style="border:none;border-top:2px solid #3a2030;margin:6px 0">
-      <b style="color:#ff7ab8;font-size:13px">➕ เพิ่ม/แก้แมพ</b>
+      <hr class="divider">
+      <b class="subttl">➕ เพิ่ม/แก้แมพ</b>
       <div class="rb-row">
         <label>ID แมพ<input id="mpId" placeholder="เช่น farmer"></label>
         <label>ชื่อแมพ<input id="mpName" placeholder="เช่น Mooni Farm"></label>
@@ -1330,15 +1447,16 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
       </div>
       <input type="hidden" id="mpEditId">
       <button class="btn pink" id="mpSave">บันทึกแมพ</button>
-      <button class="btn" id="mpClear" style="background:#241823;color:#fff;box-shadow:none">ล้างฟอร์ม</button>
+      <button class="btn" id="mpClear">ล้างฟอร์ม</button>
       <div class="msg" id="mpMsg"></div>
     </div>
   </details>
 
-  <div class="tablecard"><table><thead><tr>
-    <th>สมาชิก</th><th>Mooni</th><th>Pro</th><th>Minecraft</th><th>Candy Block</th><th>Farmer</th><th>หมดอายุแอป</th>
-  </tr></thead><tbody id="rows"></tbody></table></div>
+  </section>
+
+  <div class="modal hidden" id="modal"><div class="sheet" id="sheet"></div></div>
 </div>
+<div class="toast" id="toast"></div>
 <script>
   const $=id=>document.getElementById(id);
   let KEY=localStorage.getItem('mooniKey')||'';
@@ -1359,84 +1477,149 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     if(h>0)return['เหลือ '+h+' ชม. '+m+' นาที',''];
     return['เหลือ '+m+' นาที',''];
   }
-  const DUR='<option value="">＋ ตั้งเวลา…</option>'+
-    '<option value="300000">5 นาที</option>'+
-    '<option value="3600000">1 ชั่วโมง</option>'+
-    '<option value="86400000">1 วัน</option>'+
-    '<option value="604800000">7 วัน</option>'+
-    '<option value="2592000000">30 วัน</option>'+
-    '<option value="7776000000">90 วัน</option>'+
-    '<option value="15552000000">6 เดือน</option>'+
-    '<option value="31536000000">1 ปี</option>'+
-    '<option value="perm">♾ ถาวร</option>';
+  /* ยศทั้งหมดที่จัดการได้ในหน้าต่างตั้งค่า */
+  const SERVERS=[
+    {id:'mooni',name:'Mooni',emoji:'🌙',flag:'mooni',exp:'mooniExp'},
+    {id:'prime',name:'Pro',emoji:'⚡',flag:'prime',exp:'primeExp'},
+    {id:'mc',name:'Minecraft',emoji:'⛏️',flag:'mc',exp:'mcExp'},
+    {id:'candy',name:'Candy Block',emoji:'🍬',flag:'candy',exp:'candyExp'},
+    {id:'farmer',name:'Farmer',emoji:'🌾',flag:'farmer',exp:'farmerExp'},
+    {id:'diamond',name:'Diamond',emoji:'💎',flag:'diamond',exp:'diamondExp'},
+    {id:'parkour',name:'Parkour',emoji:'🏃',flag:'parkour',exp:'parkourExp'},
+  ];
+  const QUICK=[['1 วัน',86400000],['7 วัน',604800000],['30 วัน',2592000000],['90 วัน',7776000000]];
+  const short=t=>t.indexOf('เหลือ ')===0?t.slice(6):t;          // "เหลือ 3 วัน" -> "3 วัน"
+  const tone=c=>c==='gone'?'danger':c==='perm'?'blue':'ok';     // สีของป้ายตามสถานะ
+  function paintAvatars(root){
+    (root||document).querySelectorAll('.face[data-av]').forEach(el=>{
+      if(el.dataset.av)el.style.backgroundImage='url('+JSON.stringify(el.dataset.av)+')';
+    });
+  }
+  function memberCard(m){
+    let pills='';
+    SERVERS.forEach(s=>{
+      if(!m[s.flag])return;
+      const[t,c]=fmtExp(m[s.exp]);
+      pills+='<span class="pill '+tone(c)+'">'+s.emoji+' '+s.name+'<i>'+short(t)+'</i></span>';
+    });
+    const[at,ac]=fmtExp(m.exp);
+    return '<article class="mcard" data-uid="'+m.uid+'">'+
+      '<div class="mhead"><div class="face" data-av="'+esc(m.avatar||'')+'"></div>'+
+        '<div class="mwho"><b>'+esc(m.name)+'</b><span class="badge '+(m.active?'live':'off')+'">'+(m.active?'ออนไลน์':'ออฟไลน์')+'</span></div>'+
+        '<span class="gear">⚙</span></div>'+
+      '<div class="mpills">'+(pills||'<span class="pill none">ยังไม่มียศ</span>')+
+        '<span class="pill '+tone(ac)+'">📱 แอป<i>'+short(at)+'</i></span></div></article>';
+  }
   function render(){
     const q=$('search').value.trim().toLowerCase();
     const list=members.filter(m=>!q||m.name.toLowerCase().includes(q));
-    $('count').textContent=list.length+' คน · ออนไลน์ '+members.filter(m=>m.active).length;
-    $('rows').innerHTML=list.map(m=>{
-      const[et,ec]=fmtExp(m.exp);
-      const[met,mec]=fmtExp(m.mcExp);
-      const[moet,moec]=fmtExp(m.mooniExp);
-      const[peo,pec]=fmtExp(m.primeExp);
-      const[ceo,cec]=fmtExp(m.candyExp);
-      const[feo,fec]=fmtExp(m.farmerExp);
-      return '<tr data-uid="'+m.uid+'">'+
-        '<td><div class="who"><div class="face" style="background-image:url(\\''+(m.avatar||'')+'\\')"></div>'+
-          '<div><span class="dot '+(m.active?'on':'')+'"></span>'+esc(m.name)+'</div></div></td>'+
-        '<td><span class="tag tog '+(m.mooni?'y':'')+'" data-role="mooni">'+(m.mooni?'มี ✓':'ไม่มี')+'</span>'+
-          '<div class="exp '+moec+'">'+(m.mooni?moet:'')+'</div>'+
-          '<div class="setrow"><select class="dur roledur" data-role="mooni">'+DUR+'</select>'+
-          '<button class="btn mini rolegone" data-role="mooni">ถอด</button></div></td>'+
-        '<td><span class="tag tog '+(m.prime?'y':'')+'" data-role="prime">'+(m.prime?'มี ✓':'ไม่มี')+'</span>'+
-          '<div class="exp '+pec+'">'+(m.prime?peo:'')+'</div>'+
-          '<div class="setrow"><select class="dur roledur" data-role="prime">'+DUR+'</select>'+
-          '<button class="btn mini rolegone" data-role="prime">ถอด</button></div></td>'+
-        '<td><span class="tag tog '+(m.mc?'y':'')+'" data-role="mc">'+(m.mc?'มี ✓':'ไม่มี')+'</span>'+
-          '<div class="exp '+mec+'">'+(m.mc?met:'')+'</div>'+
-          '<div class="setrow"><select class="dur roledur" data-role="mc">'+DUR+'</select>'+
-          '<button class="btn mini rolegone" data-role="mc">ถอด</button></div></td>'+
-        '<td><span class="tag tog '+(m.candy?'y':'')+'" data-role="candy">'+(m.candy?'มี ✓':'ไม่มี')+'</span>'+
-          '<div class="exp '+cec+'">'+(m.candy?ceo:'')+'</div>'+
-          '<div class="setrow"><select class="dur roledur" data-role="candy">'+DUR+'</select>'+
-          '<button class="btn mini rolegone" data-role="candy">ถอด</button></div></td>'+
-        '<td><span class="tag tog '+(m.farmer?'y':'')+'" data-role="farmer">'+(m.farmer?'มี ✓':'ไม่มี')+'</span>'+
-          '<div class="exp '+fec+'">'+(m.farmer?feo:'')+'</div>'+
-          '<div class="setrow"><select class="dur roledur" data-role="farmer">'+DUR+'</select>'+
-          '<button class="btn mini rolegone" data-role="farmer">ถอด</button></div></td>'+
-        '<td><div class="exp '+ec+'">'+et+'</div>'+
-          '<div class="setrow"><select class="dur">'+DUR+'</select>'+
-          '<button class="btn mini gone">หมดอายุ</button></div></td></tr>';
-    }).join('');
+    $('count').innerHTML='<b>'+members.length+'</b> สมาชิก · <span class="on">'+members.filter(m=>m.active).length+' ออนไลน์</span>';
+    $('cards').innerHTML=list.map(memberCard).join('')||'<div class="empty">ไม่พบสมาชิกชื่อนี้</div>';
+    paintAvatars($('cards'));
   }
   function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 
+  let cur=null, toastT=null;    // cur = สมาชิกที่เปิดหน้าต่างตั้งค่าอยู่
   async function load(){
-    try{const d=await call('/panel/members',{});members=d.members||[];render();$('pmsg').textContent='';}
-    catch(e){$('pmsg').textContent=e.message;}
-  }
-  $('rows').addEventListener('click',async e=>{
-    const tr=e.target.closest('tr');if(!tr)return;const uid=tr.dataset.uid;
     try{
-      if(e.target.classList.contains('tog')){
-        const role=e.target.dataset.role,on=!e.target.classList.contains('y');
-        e.target.textContent='...';await call('/panel/role',{uid,role,on});await load();
-      }else if(e.target.classList.contains('rolegone')){
-        const role=e.target.dataset.role;
-        await call('/panel/roleexpiry',{uid,role,exp:Date.now()-1000});await load();
-      }else if(e.target.classList.contains('gone')){await call('/panel/expiry',{uid,exp:Date.now()-1000});await load();}
-    }catch(err){$('pmsg').textContent=err.message;}
+      const d=await call('/panel/members',{});members=d.members||[];render();$('pmsg').textContent='';
+      if(cur){                                   // หน้าต่างเปิดอยู่ → อัปเดตข้อมูลสดในหน้าต่างด้วย
+        const uid=cur.uid;
+        cur=members.find(m=>m.uid===uid)||null;
+        if(cur)drawSheet();else closeMember();
+      }
+    }catch(e){$('pmsg').textContent=e.message;}
+  }
+
+  /* ---------- หน้าต่างตั้งค่าสมาชิก (การ์ด → หน้าต่างแยก) ---------- */
+  function toast(msg,ok){
+    const el=$('toast');el.textContent=msg;el.className='toast show'+(ok===false?' bad':'');
+    clearTimeout(toastT);toastT=setTimeout(()=>{el.className='toast';},2200);
+  }
+  const chips=()=>QUICK.map(([lab,ms])=>'<button class="chip" data-act="set" data-ms="'+ms+'">'+lab+'</button>').join('')+
+    '<button class="chip" data-act="set" data-ms="0">♾ ถาวร</button>'+
+    '<button class="chip ghost" data-act="custom">✎ กำหนดเอง</button>';
+  const customRow=()=>'<div class="crow hidden"><input type="number" class="cnum" min="1" value="3">'+
+    '<select class="cunit"><option value="60">นาที</option><option value="3600">ชั่วโมง</option>'+
+    '<option value="86400" selected>วัน</option><option value="2592000">เดือน</option></select>'+
+    '<button class="chip ok" data-act="customset">ตั้งเวลา</button></div>';
+  function drawSheet(){
+    const m=cur;if(!m)return;
+    const roleRow=s=>{
+      const has=!!m[s.flag];const[t,c]=fmtExp(m[s.exp]);
+      return '<div class="srow" data-role="'+s.id+'">'+
+        '<button class="sw '+(has?'on':'')+'" data-act="toggle" title="'+(has?'ถอดยศ':'ให้ยศ')+'"><i></i></button>'+
+        '<div class="sinfo"><b>'+s.emoji+' '+s.name+'</b><span class="st '+(has?c:'')+'">'+(has?t:'ยังไม่มียศ')+'</span></div>'+
+        '<div class="schips">'+chips()+(has?'<button class="chip del" data-act="del">✕ ถอดยศ</button>':'')+'</div>'+
+        customRow()+'</div>';
+    };
+    const[at,ac]=fmtExp(m.exp);
+    $('sheet').innerHTML=
+      '<div class="shead"><div class="face" data-av="'+esc(m.avatar||'')+'"></div>'+
+        '<div class="swho"><b>'+esc(m.name)+'</b><span class="badge '+(m.active?'live':'off')+'">'+(m.active?'ออนไลน์':'ออฟไลน์')+'</span></div>'+
+        '<button class="x" data-act="close">✕</button></div>'+
+      '<p class="hint">สวิตช์ = ให้/ถอดยศทันที · ปุ่มวัน = ให้ยศพร้อมตั้งเวลาถอดเอง · ยังไม่มียศก็กดปุ่มวันได้เลย</p>'+
+      '<div class="sblock">'+SERVERS.map(roleRow).join('')+'</div>'+
+      '<div class="sblock"><div class="srow" data-role="app">'+
+        '<span class="appico">📱</span>'+
+        '<div class="sinfo"><b>สิทธิ์ใช้แอป</b><span class="st '+ac+'">'+at+'</span></div>'+
+        '<div class="schips">'+chips()+'<button class="chip del" data-act="del">✕ ตัดสิทธิ์</button></div>'+
+        customRow()+'</div></div>'+
+      '<div class="sfoot"><button class="btn" data-act="close">ปิดหน้าต่าง</button></div>';
+    paintAvatars($('sheet'));
+  }
+  async function openMember(uid){
+    cur=members.find(m=>m.uid===uid)||null;if(!cur)return;
+    drawSheet();$('modal').classList.remove('hidden');document.body.style.overflow='hidden';
+    await load();                                 // ดึงข้อมูลสดมาแสดง
+  }
+  function closeMember(){$('modal').classList.add('hidden');document.body.style.overflow='';cur=null;}
+
+  $('cards').addEventListener('click',e=>{
+    const c=e.target.closest('.mcard');if(c)openMember(c.dataset.uid);
   });
-  // เลือกเวลาจากดรอปดาวน์เดียว แล้วตั้งเลยทันที
-  $('rows').addEventListener('change',async e=>{
-    if(!e.target.classList.contains('dur'))return;
-    const tr=e.target.closest('tr');const uid=tr.dataset.uid,v=e.target.value;
-    if(!v)return;
-    const isRoleDur=e.target.classList.contains('roledur');
-    const path=isRoleDur?'/panel/roleexpiry':'/panel/expiry';
-    const body={uid,exp:v==='perm'?0:Date.now()+Number(v)};
-    if(isRoleDur) body.role=e.target.dataset.role;
-    try{await call(path,body);await load();}
-    catch(err){$('pmsg').textContent=err.message;e.target.value='';}
+  $('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeMember();});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMember();});
+
+  $('sheet').addEventListener('click',async e=>{
+    const el=e.target.closest('[data-act]');if(!el||!cur)return;
+    const act=el.dataset.act;
+    if(act==='close')return closeMember();
+    const row=el.closest('.srow');if(!row)return;
+    const role=row.dataset.role,isApp=role==='app';
+    const s=SERVERS.find(x=>x.id===role);
+    const uid=cur.uid;
+    try{
+      if(act==='custom'){                           // เปิดช่องใส่เวลากำหนดเอง
+        row.querySelector('.crow').classList.toggle('hidden');return;
+      }
+      if(act==='toggle'){                           // สวิตช์ให้/ถอดยศ
+        const on=!cur[s.flag];el.classList.add('busy');
+        await call('/panel/role',{uid,role,on});
+        await load();
+        return toast(on?'ให้ยศ '+s.name+' แล้ว ✓':'ถอดยศ '+s.name+' แล้ว',true);
+      }
+      el.classList.remove('busy');
+      let exp;
+      if(act==='customset'){
+        const n=Number(row.querySelector('.cnum').value)||0;
+        const unit=Number(row.querySelector('.cunit').value)||86400;
+        if(!n)return toast('ใส่จำนวนเวลาก่อน',false);
+        exp=Date.now()+n*unit*1000;
+      }else if(act==='del'){exp=Date.now()-1000;}
+      else{const ms=Number(el.dataset.ms);exp=ms===0?0:Date.now()+ms;}
+      if(isApp)await call('/panel/expiry',{uid,exp});
+      else await call('/panel/roleexpiry',{uid,role,exp});
+      await load();
+      toast(exp===0?'ตั้งเป็นถาวรแล้ว ✓':(exp<Date.now()?'เอาออกเรียบร้อย ✓':'ตั้งเวลาเรียบร้อย ✓'),true);
+    }catch(err){toast(err.message,false);}
+  });
+
+  /* ---------- สลับแท็บ (สมาชิก / ปุ่ม Discord / ร้านค้า / แมพ) ---------- */
+  $('seg').addEventListener('click',e=>{
+    const b=e.target.closest('button[data-tab]');if(!b)return;
+    document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b));
+    document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.dataset.pane===b.dataset.tab));
   });
   // อ่านไฟล์รูปเป็น base64 (ใช้ร่วมกันทั้ง 2 ฟอร์ม)
   async function readImg(input){
@@ -1448,14 +1631,14 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     return {imageData,imageName:f.name};
   }
   $('tkSend').addEventListener('click',async()=>{
-    const b=$('tkSend');b.disabled=true;$('tkMsg').style.color='#b58aa0';$('tkMsg').textContent='กำลังส่ง…';
+    const b=$('tkSend');b.disabled=true;$('tkMsg').style.color='#8ea6cc';$('tkMsg').textContent='กำลังส่ง…';
     try{
       const img=await readImg($('tkFile'));
       await call('/panel/ticketpanel',{channelId:$('tkChannel').value.trim(),staffRoleId:$('tkRole').value.trim(),
         categoryId:$('tkCat').value.trim(),text:$('tkText').value,imageUrl:$('tkImage').value.trim(),
         ...img,buttonLabel:$('tkLabel').value.trim()});
-      $('tkMsg').style.color='#57d97e';$('tkMsg').textContent='✅ ส่งเข้าห้องแล้ว';
-    }catch(e){$('tkMsg').style.color='#ff5a6a';$('tkMsg').textContent=e.message;}
+      $('tkMsg').style.color='#3ddc97';$('tkMsg').textContent='✅ ส่งเข้าห้องแล้ว';
+    }catch(e){$('tkMsg').style.color='#ff6b7f';$('tkMsg').textContent=e.message;}
     finally{b.disabled=false;}
   });
   /* ---- ร้านค้า ---- */
@@ -1470,34 +1653,34 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
       $('shName').value=s.shopName||'';$('shNote').value=s.shopNote||'';
       $('shPayNum').value=s.payNumber||'';$('shPayName').value=s.payName||'';$('shChannel').value=s.adminChannelId||'';
       $('pList').innerHTML=(d.products||[]).map(p=>
-        '<div style="display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid #221820">'+
-        (p.image?'<img src="'+p.image+'" style="width:38px;height:38px;object-fit:cover;border:2px solid #3a2030">':'')+
-        '<div style="flex:1"><b>'+esc(p.name)+'</b> · '+[p.price30?'30ว ฿'+p.price30:'',p.price90?'90ว ฿'+p.price90:''].filter(Boolean).join(' / ')+(p.active===false?' <span style="color:#ff5a6a">(ปิด)</span>':'')+'</div>'+
+        '<div style="display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">'+
+        (p.image?'<img src="'+p.image+'" style="width:38px;height:38px;object-fit:cover;border:2px solid rgba(255,255,255,.14)">':'')+
+        '<div style="flex:1"><b>'+esc(p.name)+'</b> · '+[p.price30?'30ว ฿'+p.price30:'',p.price90?'90ว ฿'+p.price90:''].filter(Boolean).join(' / ')+(p.active===false?' <span style="color:#ff6b7f">(ปิด)</span>':'')+'</div>'+
         '<button class="btn mini" data-ed="'+p.id+'">แก้</button>'+
-        '<button class="btn mini" data-del="'+p.id+'" style="border-color:#6b2f3f">ลบ</button></div>').join('')||'<p style="color:#b58aa0;font-size:12px;margin-top:8px">ยังไม่มีสินค้า</p>';
+        '<button class="btn mini" data-del="'+p.id+'" style="border-color:rgba(255,107,127,.45)">ลบ</button></div>').join('')||'<p style="color:#8ea6cc;font-size:12px;margin-top:8px">ยังไม่มีสินค้า</p>';
       window.__products=d.products||[];
-    }catch(e){$('pMsg2').style.color='#ff5a6a';$('pMsg2').textContent=e.message;}
+    }catch(e){$('pMsg2').style.color='#ff6b7f';$('pMsg2').textContent=e.message;}
   }
   $('shSaveSettings').addEventListener('click',async()=>{
-    const b=$('shSaveSettings');b.disabled=true;$('shSetMsg').style.color='#b58aa0';$('shSetMsg').textContent='กำลังบันทึก…';
+    const b=$('shSaveSettings');b.disabled=true;$('shSetMsg').style.color='#8ea6cc';$('shSetMsg').textContent='กำลังบันทึก…';
     try{
       const qr=await fileToData($('shQr'));
       await call('/panel/shop/settings',{shopName:$('shName').value.trim(),shopNote:$('shNote').value.trim(),
         payNumber:$('shPayNum').value.trim(),payName:$('shPayName').value.trim(),adminChannelId:$('shChannel').value.trim(),
         ...(qr?{payQr:qr}:{})});
-      $('shSetMsg').style.color='#57d97e';$('shSetMsg').textContent='✅ บันทึกแล้ว';
-    }catch(e){$('shSetMsg').style.color='#ff5a6a';$('shSetMsg').textContent=e.message;}
+      $('shSetMsg').style.color='#3ddc97';$('shSetMsg').textContent='✅ บันทึกแล้ว';
+    }catch(e){$('shSetMsg').style.color='#ff6b7f';$('shSetMsg').textContent=e.message;}
     finally{b.disabled=false;}
   });
   $('pSave').addEventListener('click',async()=>{
-    const b=$('pSave');b.disabled=true;$('pMsg2').style.color='#b58aa0';$('pMsg2').textContent='กำลังบันทึก…';
+    const b=$('pSave');b.disabled=true;$('pMsg2').style.color='#8ea6cc';$('pMsg2').textContent='กำลังบันทึก…';
     try{
       const img=await fileToData($('pImg'));
       await call('/panel/shop/product',{id:$('pId').value,name:$('pName').value.trim(),desc:$('pDesc').value,
         price30:$('pPrice30').value,price90:$('pPrice90').value,roleId:$('pRole').value.trim(),...(img!==null?{image:img}:{})});
-      $('pMsg2').style.color='#57d97e';$('pMsg2').textContent='✅ บันทึกสินค้าแล้ว';
+      $('pMsg2').style.color='#3ddc97';$('pMsg2').textContent='✅ บันทึกสินค้าแล้ว';
       clearProd();loadShop();
-    }catch(e){$('pMsg2').style.color='#ff5a6a';$('pMsg2').textContent=e.message;}
+    }catch(e){$('pMsg2').style.color='#ff6b7f';$('pMsg2').textContent=e.message;}
     finally{b.disabled=false;}
   });
   function clearProd(){$('pId').value='';$('pName').value='';$('pDesc').value='';$('pPrice30').value='0';$('pPrice90').value='0';$('pImg').value='';$('pRole').value='1529344448817791016';}
@@ -1511,7 +1694,7 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   $('search').addEventListener('input',render);
   $('refresh').addEventListener('click',load);
   $('rbSend').addEventListener('click',async()=>{
-    const b=$('rbSend');b.disabled=true;$('rbMsg').style.color='#b58aa0';$('rbMsg').textContent='กำลังส่ง…';
+    const b=$('rbSend');b.disabled=true;$('rbMsg').style.color='#8ea6cc';$('rbMsg').textContent='กำลังส่ง…';
     try{
       // มีไฟล์รูป -> อ่านเป็น base64 ส่งไปให้บอทแนบ
       let imageData=null,imageName=null;
@@ -1526,41 +1709,41 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
       await call('/panel/rolebutton',{channelId:$('rbChannel').value.trim(),roleId:$('rbRole').value.trim(),
         text:$('rbText').value,imageUrl:$('rbImage').value.trim(),imageData,imageName,
         buttonLabel:$('rbLabel').value.trim()});
-      $('rbMsg').style.color='#57d97e';$('rbMsg').textContent='✅ ส่งเข้าห้องแล้ว';
-    }catch(e){$('rbMsg').style.color='#ff5a6a';$('rbMsg').textContent=e.message;}
+      $('rbMsg').style.color='#3ddc97';$('rbMsg').textContent='✅ ส่งเข้าห้องแล้ว';
+    }catch(e){$('rbMsg').style.color='#ff6b7f';$('rbMsg').textContent=e.message;}
     finally{b.disabled=false;}
   });
   $('enter').addEventListener('click',async()=>{
     KEY=$('key').value.trim();localStorage.setItem('mooniKey',KEY);
-    try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();loadShop();loadMaps();setInterval(load,15000);}
+    try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();loadShop();loadMaps();setInterval(()=>{if(!cur)load();},15000);}
     catch(e){$('lmsg').textContent=e.message;}
   });
   /* ---- Maps config ---- */
   let mapsData={maps:[],buyDiscordChannel:''};
   async function loadMaps(){
-    try{const d=await call('/api/maps',{});mapsData=d;$('mapDiscordGuild').value=d.buyDiscordGuild||'';$('mapDiscordCh').value=d.buyDiscordChannel||'';renderMapList();}catch(e){$('mpMsg').style.color='#ff5a6a';$('mpMsg').textContent=e.message;}
+    try{const d=await call('/api/maps',{});mapsData=d;$('mapDiscordGuild').value=d.buyDiscordGuild||'';$('mapDiscordCh').value=d.buyDiscordChannel||'';renderMapList();}catch(e){$('mpMsg').style.color='#ff6b7f';$('mpMsg').textContent=e.message;}
   }
   function renderMapList(){
     $('mapList').innerHTML=(mapsData.maps||[]).map(m=>
-      '<div style="display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid #221820">'+
-      (m.img?'<img src="/"+m.img+"" style="width:38px;height:38px;object-fit:cover;border:2px solid #3a2030">':'')+
-      '<div style="flex:1"><b>'+esc(m.name)+'</b> · '+esc(m.price||'')+(m.isNew?' <span style="color:#ff5a6a">(NEW)</span>':'')+(m.role?' <span style="color:#b58aa0">ยศ: '+esc(m.role)+'</span>':'')+'</div>'+
+      '<div style="display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">'+
+      (m.img?'<img src="/"+m.img+"" style="width:38px;height:38px;object-fit:cover;border:2px solid rgba(255,255,255,.14)">':'')+
+      '<div style="flex:1"><b>'+esc(m.name)+'</b> · '+esc(m.price||'')+(m.isNew?' <span style="color:#ff6b7f">(NEW)</span>':'')+(m.role?' <span style="color:#8ea6cc">ยศ: '+esc(m.role)+'</span>':'')+'</div>'+
       '<button class="btn mini" data-medit="'+m.id+'">แก้</button>'+
-      '<button class="btn mini" data-mdel="'+m.id+'" style="border-color:#6b2f3f">ลบ</button></div>').join('')||'<p style="color:#b58aa0;font-size:12px;margin-top:8px">ยังไม่มีแมพ</p>';
+      '<button class="btn mini" data-mdel="'+m.id+'" style="border-color:rgba(255,107,127,.45)">ลบ</button></div>').join('')||'<p style="color:#8ea6cc;font-size:12px;margin-top:8px">ยังไม่มีแมพ</p>';
   }
   $('mapList').addEventListener('click',async e=>{
     const ed=e.target.dataset.medit,del=e.target.dataset.mdel;
     if(ed){const m=(mapsData.maps||[]).find(x=>x.id===ed);if(m){$('mpId').value=m.id;$('mpId').disabled=true;$('mpName').value=m.name||'';$('mpPrice').value=m.price||'';$('mpImg').value=m.img||'';$('mpEmoji').value=m.emoji||'';$('mpRole').value=m.role||'';$('mpNew').checked=!!m.isNew;$('mpEditId').value=m.id;$('mpName').scrollIntoView({behavior:'smooth'});}}
-    if(del&&confirm('ลบแมพนี้?')){try{await call('/api/maps/delete',{id:del});loadMaps();}catch(err){$('mpMsg').style.color='#ff5a6a';$('mpMsg').textContent=err.message;}}
+    if(del&&confirm('ลบแมพนี้?')){try{await call('/api/maps/delete',{id:del});loadMaps();}catch(err){$('mpMsg').style.color='#ff6b7f';$('mpMsg').textContent=err.message;}}
   });
   $('mpSave').addEventListener('click',async()=>{
     const id=$('mpEditId').value||$('mpId').value.trim();
-    if(!id){$('mpMsg').style.color='#ff5a6a';$('mpMsg').textContent='ต้องใส่ ID แมพ';return;}
+    if(!id){$('mpMsg').style.color='#ff6b7f';$('mpMsg').textContent='ต้องใส่ ID แมพ';return;}
     const map={name:$('mpName').value.trim(),price:$('mpPrice').value.trim(),img:$('mpImg').value.trim(),emoji:$('mpEmoji').value.trim(),role:$('mpRole').value.trim(),isNew:$('mpNew').checked,overlays:[],downloads:[],commands:[]};
     // ถ้าแก้ ให้เก่าของเดิมไว้
     const old=(mapsData.maps||[]).find(m=>m.id===id);
     if(old){map.overlays=old.overlays||[];map.downloads=old.downloads||[];map.commands=old.commands||[];}
-    try{await call('/api/maps/save',{id,map});$('mpMsg').style.color='#57d97e';$('mpMsg').textContent='✅ บันทึกแล้ว';clearMapForm();loadMaps();}catch(e){$('mpMsg').style.color='#ff5a6a';$('mpMsg').textContent=e.message;}
+    try{await call('/api/maps/save',{id,map});$('mpMsg').style.color='#3ddc97';$('mpMsg').textContent='✅ บันทึกแล้ว';clearMapForm();loadMaps();}catch(e){$('mpMsg').style.color='#ff6b7f';$('mpMsg').textContent=e.message;}
   });
   function clearMapForm(){$('mpId').value='';$('mpId').disabled=false;$('mpName').value='';$('mpPrice').value='';$('mpImg').value='';$('mpEmoji').value='';$('mpRole').value='';$('mpNew').checked=false;$('mpEditId').value='';}
   $('mpClear').addEventListener('click',clearMapForm);
@@ -1714,7 +1897,7 @@ async function handlePanel(pathname, data) {
       STORE_ENABLED ? getRoleExpMap() : {},
     ]);
     const now = Date.now();
-    const roleIdMap = { mc: D.mcRoleId, mooni: D.roleId, prime: D.primeRoleId, candy: D.candyRoleId, farmer: D.farmerRoleId, diamond: D.diamondRoleId };
+    const roleIdMap = { mc: D.mcRoleId, mooni: D.roleId, prime: D.primeRoleId, candy: D.candyRoleId, farmer: D.farmerRoleId, diamond: D.diamondRoleId, parkour: D.parkourRoleId };
     const members = list.map((m) => ({
       ...m,
       exp: accessMap[m.uid]?.exp || 0,
@@ -1724,6 +1907,7 @@ async function handlePanel(pathname, data) {
       candyExp: roleIdMap.candy ? (roleExpMap[`${m.uid}:${roleIdMap.candy}`] || 0) : 0,
       farmerExp: roleIdMap.farmer ? (roleExpMap[`${m.uid}:${roleIdMap.farmer}`] || 0) : 0,
       diamondExp: roleIdMap.diamond ? (roleExpMap[`${m.uid}:${roleIdMap.diamond}`] || 0) : 0,
+      parkourExp: roleIdMap.parkour ? (roleExpMap[`${m.uid}:${roleIdMap.parkour}`] || 0) : 0,
       active: (now - (lastSeen.get(m.uid) || 0)) < ACTIVE_WINDOW,
     }));
     // เรียง: ออนไลน์ก่อน แล้วตามชื่อ
@@ -1732,7 +1916,7 @@ async function handlePanel(pathname, data) {
   }
 
   if (pathname === '/panel/role') {
-    const roleId = data.role === 'prime' ? D.primeRoleId : data.role === 'mc' ? D.mcRoleId : data.role === 'candy' ? D.candyRoleId : data.role === 'farmer' ? D.farmerRoleId : D.roleId;
+    const roleId = data.role === 'prime' ? D.primeRoleId : data.role === 'mc' ? D.mcRoleId : data.role === 'candy' ? D.candyRoleId : data.role === 'farmer' ? D.farmerRoleId : data.role === 'diamond' ? D.diamondRoleId : data.role === 'parkour' ? D.parkourRoleId : D.roleId;
     if (!roleId) return { code: 400, body: { error: 'ยังไม่ได้ตั้งไอดียศนี้' } };
     const ok = await botSetRole(String(data.uid), roleId, !!data.on);
     // ถอดยศ = ล้างวันหมดอายุที่ตั้งไว้ด้วย (กันกวาดซ้ำ)
@@ -1746,7 +1930,7 @@ async function handlePanel(pathname, data) {
     if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
     // หา roleId จาก role name หรือใช้ mcRoleId เดิม
     const roleParam = data.role || 'mc';
-    const roleIdMap = { mc: D.mcRoleId, mooni: D.roleId, prime: D.primeRoleId, candy: D.candyRoleId, farmer: D.farmerRoleId, diamond: D.diamondRoleId };
+    const roleIdMap = { mc: D.mcRoleId, mooni: D.roleId, prime: D.primeRoleId, candy: D.candyRoleId, farmer: D.farmerRoleId, diamond: D.diamondRoleId, parkour: D.parkourRoleId };
     const roleId = roleIdMap[roleParam];
     if (!roleId) return { code: 400, body: { error: 'ยังไม่ได้ตั้งไอดียศ ' + roleParam } };
     const uid = String(data.uid);
@@ -1958,7 +2142,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && url.pathname === '/strings-admin') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(`<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mooni — แก้ข้อความในแอป</title>
-<style>body{font-family:system-ui,'Segoe UI','Noto Sans Thai',sans-serif;background:#0a0a0c;color:#fdeef5;max-width:720px;margin:0 auto;padding:20px}h1{color:#ff7ab8;font-size:18px}input,textarea{width:100%;box-sizing:border-box;padding:10px;background:#17141b;color:#fdeef5;border:2px solid #3a2030;border-radius:8px;font:inherit;margin:6px 0}textarea{min-height:320px;font-family:ui-monospace,Consolas,monospace;font-size:13px}button{padding:10px 16px;margin:4px 4px 4px 0;background:#d64f92;color:#fff;border:0;border-radius:8px;font:inherit;font-weight:700;cursor:pointer}.hint{color:#b58aa0;font-size:13px}.status{margin-top:10px;min-height:20px}</style></head><body>
+<style>body{font-family:system-ui,'Segoe UI','Noto Sans Thai',sans-serif;background:#0a0a0c;color:#fdeef5;max-width:720px;margin:0 auto;padding:20px}h1{color:#ff7ab8;font-size:18px}input,textarea{width:100%;box-sizing:border-box;padding:10px;background:#17141b;color:#fdeef5;border:2px solid rgba(255,255,255,.14);border-radius:8px;font:inherit;margin:6px 0}textarea{min-height:320px;font-family:ui-monospace,Consolas,monospace;font-size:13px}button{padding:10px 16px;margin:4px 4px 4px 0;background:#d64f92;color:#fff;border:0;border-radius:8px;font:inherit;font-weight:700;cursor:pointer}.hint{color:#8ea6cc;font-size:13px}.status{margin-top:10px;min-height:20px}</style></head><body>
 <h1>แก้ข้อความในแอป (hot-update)</h1>
 <p class="hint">ใส่รหัสแอดมิน → Load → แก้ JSON (คีย์:ข้อความ) → Save &amp; push แล้วทุกแอปที่เปิดอยู่จะเปลี่ยนทันที</p>
 <input id="key" type="password" placeholder="รหัสแอดมิน (ADMIN_KEY)" autocomplete="current-password">
