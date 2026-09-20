@@ -69,6 +69,7 @@
 | `DISCORD_FARMER_ROLE_ID` | ยศ Farmer — ปลดล็อกการ์ดแมพ Farmer ในหน้า Minecraft (ไม่ตั้ง = ใช้ไอดีเริ่มต้น) |
 | `DISCORD_DIAMOND_ROLE_ID` | ยศ Diamond — ปลดล็อกการ์ด Mooni Diamond ในหน้า Minecraft (ไม่ตั้ง = ใช้ไอดีเริ่มต้น) |
 | `DISCORD_PARKOUR_ROLE_ID` | ยศ Parkour V1 — ปลดล็อกการ์ดแมพพาร์คคอร์ (ไม่ตั้ง = ใช้ไอดีเริ่มต้น `1550867888531968170`) |
+| `DISCORD_SPEEDRUN_ROLE_ID` | ยศ Diamond Speedrun — ปลดล็อกการ์ด Diamond Speedrun (ไม่ตั้ง = ใช้ไอดีเริ่มต้น `1551020999070322698`) |
 | `DISCORD_INVITE` | ลิงก์ชวนเข้าเซิร์ฟเวอร์ (เช่น https://discord.gg/xxxx) |
 | `AUTH_SECRET` | สุ่มยาว ๆ (ถ้ายังไม่มี) |
 

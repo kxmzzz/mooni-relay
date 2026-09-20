@@ -31,6 +31,8 @@ services:
         sync: false
       - key: DISCORD_PARKOUR_ROLE_ID
         value: '1550867888531968170'   # ยศ Parkour V1 (ปลดล็อกการ์ดแมพพาร์คคอร์)
+      - key: DISCORD_SPEEDRUN_ROLE_ID
+        value: '1551020999070322698'   # ยศ Diamond Speedrun (ปลดล็อกการ์ด Diamond Speedrun)
       - key: DISCORD_BOT_TOKEN
         sync: false
       - key: DISCORD_PUBLIC_KEY
