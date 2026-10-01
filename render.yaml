@@ -21,6 +21,10 @@ services:
         sync: false
       - key: DISCORD_ROLE_ID
         sync: false
+      - key: DISCORD_GUILD2_ID
+        value: '1549377539431206962'   # ดิสที่สอง — มียศด้านล่างในดิสนี้ = ใช้แอปได้ถาวรทุกอย่าง
+      - key: DISCORD_ROLE2_ID
+        value: '1550085695110914089'   # ยศในดิสที่สอง (สิทธิ์ถาวร ปลดล็อกทุกหน้า/ทุกแมพ)
       - key: DISCORD_PRIME_ROLE_ID
         sync: false
       - key: DISCORD_MC_ROLE_ID

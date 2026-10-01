@@ -39,6 +39,9 @@ const D = {
   parkourRoleId: process.env.DISCORD_PARKOUR_ROLE_ID || '1550867888531968170',
   speedrunRoleId: process.env.DISCORD_SPEEDRUN_ROLE_ID || '1551020999070322698',   // ยศ Diamond Speedrun (ปลดล็อกการ์ด Diamond Speedrun)   // ยศ Parkour (ปลดล็อกการ์ด Parkour V1 ในหน้า Minecraft)
   botToken: process.env.DISCORD_BOT_TOKEN || '',          // โทเคนบอท — ใช้เช็คยศสดแบบเรียลไทม์ (ถอดยศแล้วรู้ทันที)
+  /* ดิสที่สอง (เช็คด้วยบอท) — มียศนี้ในดิสที่สอง = เข้าแอปได้ถาวร ปลดล็อกทุกหน้า/ทุกแมพ ข้ามเช็ควันหมดอายุ */
+  guild2Id: process.env.DISCORD_GUILD2_ID || '1549377539431206962',
+  role2Id: process.env.DISCORD_ROLE2_ID || '1550085695110914089',
   publicKey: process.env.DISCORD_PUBLIC_KEY || '',        // Public Key ของแอป — ใช้ตรวจลายเซ็นปุ่มกดจาก Discord
   invite: process.env.DISCORD_INVITE || '',
 };
@@ -876,6 +879,20 @@ async function botCheckMember(uid) {
   } catch { return { error: true }; }
 }
 
+/** ใช้บอทเช็คยศใน "ดิสที่สอง" — มียศ role2Id = สิทธิ์ถาวรทุกอย่าง (ข้ามเช็ควันหมดอายุ) */
+async function botCheckGuild2(uid) {
+  if (!D.botToken || !D.guild2Id || !D.role2Id) return false;
+  try {
+    const r = await fetch(dcApi(`/guilds/${D.guild2Id}/members/${uid}`), {
+      headers: { Authorization: `Bot ${D.botToken}` },
+    });
+    if (!r.ok) return false;   // ไม่อยู่ดิสที่สอง / API มีปัญหา = ถือว่าไม่มีสิทธิ์พิเศษ
+    const m = await r.json();
+    const roles = Array.isArray(m.roles) ? m.roles : [];
+    return roles.includes(D.role2Id);
+  } catch { return false; }
+}
+
 /** จัดการทุก request ที่ขึ้นต้น /auth — คืน true ถ้าจัดการแล้ว */
 async function handleAuth(req, res, url, cors) {
   const json = (code, obj) => {
@@ -964,9 +981,12 @@ async function handleAuth(req, res, url, cors) {
       const tok = await tokRes.json();
       const check = await checkDiscordMember(tok.access_token);
 
-      // เช็ควันหมดอายุจากคลัง (แอดมินตั้งไว้ในเว็บ) — หมดอายุแล้วเข้าไม่ได้แม้มียศ
+      // ดิสที่สอง: มียศ role2Id = สิทธิ์ถาวรทุกอย่าง — ข้ามเช็ควันหมดอายุทั้งหมด
+      const permanent = check.uid ? await botCheckGuild2(check.uid) : false;
+
+      // เช็ควันหมดอายุจากคลัง (แอดมินตั้งไว้ในเว็บ) — หมดอายุแล้วเข้าไม่ได้แม้มียศ (ยกเว้นสิทธิ์ถาวรจากดิสที่สอง)
       const accessRec = STORE_ENABLED ? await getAccess(check.uid) : null;
-      if (check.ok && !accessActive(accessRec)) {
+      if (check.ok && !permanent && !accessActive(accessRec)) {
         authResults.set(pair, { status: 'denied', reason: 'expired', name: check.name || '', at: Date.now() });
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(resultPage(false, 'หมดอายุการใช้งาน', 'สิทธิ์การใช้งานของคุณหมดอายุแล้ว — ทักแอดมินเพื่อต่ออายุ'));
@@ -975,7 +995,8 @@ async function handleAuth(req, res, url, cors) {
 
       if (check.ok) {
         const exp = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
-        const accessExp = accessRec?.exp || 0;
+        // สิทธิ์ถาวร = accessExp 0 (หน้าแอปจะโชว์ "ถาวร")
+        const accessExp = permanent ? 0 : (accessRec?.exp || 0);
         // เช็ควันหมดอายุของแต่ละยศ — หมดอายุแล้วถือว่าไม่มียศ
         let roleExpMap = {};
         if (STORE_ENABLED) roleExpMap = await getRoleExpMap();
@@ -985,14 +1006,15 @@ async function handleAuth(req, res, url, cors) {
           const roleExp = roleExpMap[`${check.uid}:${roleId}`];
           return roleExp && roleExp <= now;
         };
-        const mooniOk = !!check.mooni && !roleExpired(D.roleId);
-        const mcOk = !!check.mc && !roleExpired(D.mcRoleId);
-        const primeOk = !!check.prime && !roleExpired(D.primeRoleId);
-        const candyOk = !!check.candy && !roleExpired(D.candyRoleId);
-        const farmerOk = !!check.farmer && !roleExpired(D.farmerRoleId);
-        const diamondOk = !!check.diamond && !roleExpired(D.diamondRoleId);
-        const parkourOk = !!check.parkour && !roleExpired(D.parkourRoleId);
-        const speedrunOk = !!check.speedrun && !roleExpired(D.speedrunRoleId);
+        // สิทธิ์ถาวรจากดิสที่สอง => ผ่านประตู + ปลดล็อกทุกหน้า/ทุกแมพ ข้ามเช็ควันหมดอายุทุกยศ
+        const mooniOk = (!!check.mooni && !roleExpired(D.roleId)) || permanent;
+        const mcOk = (!!check.mc && !roleExpired(D.mcRoleId)) || permanent;
+        const primeOk = (!!check.prime && !roleExpired(D.primeRoleId)) || permanent;
+        const candyOk = (!!check.candy && !roleExpired(D.candyRoleId)) || permanent;
+        const farmerOk = (!!check.farmer && !roleExpired(D.farmerRoleId)) || permanent;
+        const diamondOk = (!!check.diamond && !roleExpired(D.diamondRoleId)) || permanent;
+        const parkourOk = (!!check.parkour && !roleExpired(D.parkourRoleId)) || permanent;
+        const speedrunOk = (!!check.speedrun && !roleExpired(D.speedrunRoleId)) || permanent;
         // ส่งวันหมดอายุของแต่ละยศกลับไปด้วย — แอปเอาไปโชว์บนการ์ดแมพ (เหลืออีกกี่วัน)
         const roleExp = roleExpOf(check.uid, D, roleExpMap);
         const token = signSession({ uid: check.uid, name: check.name, prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, parkour: parkourOk, speedrun: speedrunOk, mooni: mooniOk, exp });
@@ -1025,8 +1047,10 @@ async function handleAuth(req, res, url, cors) {
     lastSeen.set(uid, Date.now());   // นับว่ากำลังใช้งานอยู่
 
     const rec = STORE_ENABLED ? await getAccess(uid) : null;
-    const timeOk = accessActive(rec);
-    const accessExp = rec?.exp || 0;
+    // ดิสที่สอง: มียศ role2Id = สิทธิ์ถาวร — ไม่ถูกเตะเพราะวันหมดอายุ + ปลดล็อกทุกอย่าง
+    const permanent = await botCheckGuild2(uid);
+    const timeOk = permanent || accessActive(rec);
+    const accessExp = permanent ? 0 : (rec?.exp || 0);
 
     // ไม่ได้ตั้งบอท => เช็คยศสดไม่ได้ แต่ยังเช็ควันหมดอายุได้
     if (!D.botToken) {
@@ -1047,14 +1071,15 @@ async function handleAuth(req, res, url, cors) {
       const exp = roleExpMap[`${uid}:${roleId}`];
       return exp && exp <= now;
     };
-    const mooniOk = !!chk.mooni && !roleExpired(D.roleId);
-    const mcOk = !!chk.mc && !roleExpired(D.mcRoleId);
-    const primeOk = !!chk.prime && !roleExpired(D.primeRoleId);
-    const candyOk = !!chk.candy && !roleExpired(D.candyRoleId);
-    const farmerOk = !!chk.farmer && !roleExpired(D.farmerRoleId);
-    const diamondOk = !!chk.diamond && !roleExpired(D.diamondRoleId);
-    const parkourOk = !!chk.parkour && !roleExpired(D.parkourRoleId);
-    const speedrunOk = !!chk.speedrun && !roleExpired(D.speedrunRoleId);
+    // สิทธิ์ถาวรจากดิสที่สอง => ผ่าน + ปลดล็อกทุกหน้า/ทุกแมพ ข้ามเช็ควันหมดอายุทุกยศ
+    const mooniOk = (!!chk.mooni && !roleExpired(D.roleId)) || permanent;
+    const mcOk = (!!chk.mc && !roleExpired(D.mcRoleId)) || permanent;
+    const primeOk = (!!chk.prime && !roleExpired(D.primeRoleId)) || permanent;
+    const candyOk = (!!chk.candy && !roleExpired(D.candyRoleId)) || permanent;
+    const farmerOk = (!!chk.farmer && !roleExpired(D.farmerRoleId)) || permanent;
+    const diamondOk = (!!chk.diamond && !roleExpired(D.diamondRoleId)) || permanent;
+    const parkourOk = (!!chk.parkour && !roleExpired(D.parkourRoleId)) || permanent;
+    const speedrunOk = (!!chk.speedrun && !roleExpired(D.speedrunRoleId)) || permanent;
     // ยังใช้แอปได้ถ้ายังมียศ Mooni หรือยศ Minecraft อย่างใดอย่างหนึ่ง
     const valid = (mooniOk || mcOk) && timeOk;
     const reason = (!mooniOk && !mcOk) ? 'no_role' : !timeOk ? 'expired' : '';
