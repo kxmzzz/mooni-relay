@@ -130,7 +130,8 @@ function accessActive(rec) {
 /* ---------- บอทจัดการยศ + ดึงรายชื่อสมาชิก ---------- */
 
 // ฐานของ Discord API — ตั้ง DISCORD_API_BASE เป็นพร็อกซี่ได้ ถ้า IP ของเซิร์ฟเวอร์ถูกดิสคอร์ดบล็อก
-const DC_BASE = (envOf('DISCORD_API_BASE') || 'https://discord.com/api').replace(/\/$/, '');
+const DC_CUSTOM_BASE = envOf('DISCORD_API_BASE');
+const DC_BASE = (DC_CUSTOM_BASE || 'https://discord.com/api').replace(/\/$/, '');
 const dcApi = (path) => `${DC_BASE}/v10${path}`;
 const botHeaders = () => ({ Authorization: `Bot ${D.botToken}`, 'Content-Type': 'application/json', 'User-Agent': DC_UA });
 
@@ -2386,6 +2387,7 @@ const server = http.createServer((req, res) => {
       muffinToken: !!M.botToken, muffinKey: !!M.publicKey, muffinKeyLen: M.publicKey.length,
       autoSlip: AUTO_SLIP, freeQr: FREE_QR_AVAILABLE, ocr: OCR_AVAILABLE,
       discord: discordHealth,   // สถานะล่าสุดที่ relay คุยกับดิสคอร์ดได้ (ไม่มีข้อมูลลับ)
+      customApiBase: !!DC_CUSTOM_BASE,   // ยิงผ่านพร็อกซี่อยู่ไหม (ไม่โชว์ URL/รหัส)
     }));
   }
 
