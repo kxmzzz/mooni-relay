@@ -138,7 +138,20 @@ const botHeaders = () => ({ Authorization: `Bot ${D.botToken}`, 'Content-Type': 
  * หน้าจัดการสมาชิกจะโชว์ว่าว่างเปล่าโดยไม่บอกว่าเกิดอะไรขึ้น
  */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const DC_UA = 'DiscordBot (https://mooni-relay.onrender.com, 1.0)';
+// ผู้ใช้ตั้งเองได้ผ่าน env (บางที่ต้องใช้ UA แบบอื่นถึงจะผ่าน Cloudflare ของดิสคอร์ด)
+const DC_UA = envOf('DISCORD_UA') || 'DiscordBot (https://mooni-relay.onrender.com, 1.0)';
+const DC_UA_BROWSER = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+
+/** ยิงคำขอเดียวไปดิสคอร์ดเพื่อดูว่าผ่านไหม (ใช้ตอนตรวจสุขภาพ) */
+async function probeDiscord(ua) {
+  try {
+    const r = await fetch('https://discord.com/api/v10/users/@me', {
+      headers: { Authorization: `Bot ${D.botToken}`, 'User-Agent': ua },
+    });
+    const txt = r.status === 204 ? '' : await r.text();
+    return { status: r.status, ok: r.ok, html: /^\s*<(?:!doctype|html)/i.test(txt) };
+  } catch (e) { return { status: 0, ok: false, html: false, reason: String(e?.message || e).slice(0, 80) }; }
+}
 
 async function dcFetch(path, { token = D.botToken, method = 'GET', body, tries = 3 } = {}) {
   const out = { ok: false, status: 0, code: 0, error: '', html: false, data: null };
@@ -2550,8 +2563,15 @@ async function logDiscordHealth() {
   }
   const me = await dcFetch('/users/@me');
   if (!me.ok) {
-    console.log('[discord] บอทล็อกอินไม่ได้: ' + dcErrText(me) + ' → ' + dcHint(me.status, me.code));
-    discordHealth = { ok: false, status: me.status, code: me.code, reason: String(me.error || '').slice(0, 120), checkedAt: Date.now() };
+    // ลองอีกครั้งด้วย UA แบบเบราว์เซอร์ — แยกให้ออกว่าเป็นที่ IP หรือเป็นที่ลายเซ็นของคำขอ
+    const alt = await probeDiscord(DC_UA_BROWSER);
+    console.log('[discord] บอทล็อกอินไม่ได้: ' + dcErrText(me) + ' → ' + dcHint(me.status, me.code))
+    ;
+    console.log('[discord] ลองด้วย UA เบราว์เซอร์ได้ผล: HTTP ' + alt.status + (alt.html ? ' (หน้า HTML)' : ''));
+    discordHealth = {
+      ok: false, status: me.status, code: me.code, reason: String(me.error || '').slice(0, 120),
+      alt, checkedAt: Date.now(),
+    };
     return;
   }
   const m = await dcFetch('/guilds/' + D.guildId + '/members?limit=1');
