@@ -1937,7 +1937,7 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   $('enter').addEventListener('click',async()=>{
     const typed=$('key').value.trim();if(typed)KEY=typed;   // อย่าล้างรหัสที่จำไว้ เมื่อกดเข้าซ้ำ/เข้าอัตโนมัติ
     localStorage.setItem('mooniKey',KEY);
-    try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();loadShop();loadMaps();setInterval(()=>{if(!cur&&!document.hidden)load();},30000);   // ลดโหลดคำขอไปดิสคอร์ด (แท็บที่ซ่อนอยู่ไม่ต้องดึง)}
+    try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();loadShop();loadMaps();setInterval(()=>{if(!cur&&!document.hidden)load();},30000);}   // ลดโหลดคำขอไปดิสคอร์ด (แท็บที่ซ่อนอยู่ไม่ต้องดึง)
     catch(e){$('lmsg').textContent=e.message;}
   });
   /* ---- Maps config ---- */
