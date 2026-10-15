@@ -140,6 +140,8 @@ const botHeaders = () => ({ Authorization: `Bot ${D.botToken}`, 'Content-Type': 
  * หน้าจัดการสมาชิกจะโชว์ว่าว่างเปล่าโดยไม่บอกว่าเกิดอะไรขึ้น
  */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/* นับคำขอที่ยิงไปดิสคอร์ดจริง — โชว์ใน /health */
+function countDcCall() { dcCalls += 1; }
 // ผู้ใช้ตั้งเองได้ผ่าน env (บางที่ต้องใช้ UA แบบอื่นถึงจะผ่าน Cloudflare ของดิสคอร์ด)
 const DC_UA = envOf('DISCORD_UA') || 'DiscordBot (https://mooni-relay.onrender.com, 1.0)';
 const DC_UA_BROWSER = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -161,6 +163,7 @@ async function dcFetch(path, { token = D.botToken, method = 'GET', body, tries =
   for (let attempt = 1; attempt <= tries; attempt++) {
     let r;
     try {
+      countDcCall();
       r = await fetch(dcApi(path), {
         method,
         // ใส่ User-Agent ให้ครบ — บางครั้งดิสคอร์ด/Cloudflare ตีกลับถ้าไม่มี
@@ -220,10 +223,36 @@ function dcHint(status, code) {
 }
 
 /** ให้/ถอดยศ พร้อมรายละเอียดว่าล้มเพราะอะไร */
+/* ---------- แคชคำตอบจากดิสคอร์ดสั้น ๆ ----------
+ * แอปทุกเครื่องจะถาม "ยศยังใช้ได้ไหม" ซ้ำ ๆ — ถ้าถามดิสคอร์ดตรง ๆ ทุกครั้ง
+ * จะกินโควตารวมของ IP (IP ร่วมกับผู้เช่ารายอื่นบน Render) แล้วโดนแบนได้
+ * แคชไว้ไม่กี่สิบวินาที = ตอบเร็วขึ้นและลดคำขอจริงลงหลายเท่า
+ */
+const dcCache = new Map();
+let dcCalls = 0;   // นับคำขอที่ยิงไปดิสคอร์ดจริง (ดูได้ใน /health)
+function cacheGet(key) {
+  const e = dcCache.get(key);
+  return e && Date.now() - e.at < e.ttl ? e.v : null;
+}
+function cacheSet(key, v, ttl = 45000) {
+  if (dcCache.size > 4000) dcCache.clear();
+  dcCache.set(key, { at: Date.now(), v, ttl });
+  return v;
+}
+/** ล้างแคชของสมาชิกคนนี้ (หลังให้/ถอดยศ จะได้เห็นผลทันที) */
+function cacheDropUid(uid) {
+  const tail = ':' + uid;
+  for (const k of dcCache.keys()) if (k.endsWith(tail)) dcCache.delete(k);
+}
+
+/** ให้/ถอดยศ พร้อมรายละเอียดว่าล้มเพราะอะไร */
 async function botSetRoleDetail(uid, roleId, on) {
   if (!D.botToken || !roleId) return { ok: false, status: 0, code: 0, error: 'no-token-or-role', hint: '' };
   const r = await dcFetch(`/guilds/${D.guildId}/members/${uid}/roles/${roleId}`, { method: on ? 'PUT' : 'DELETE' });
-  if (r.ok) return { ok: true, status: r.status, code: 0, error: '', hint: '' };
+  if (r.ok) {
+    cacheDropUid(uid);   // ยศเปลี่ยน → ล้างแคชของคนนี้ ให้เช็คครั้งต่อไปเห็นผลทันที
+    return { ok: true, status: r.status, code: 0, error: '', hint: '' };
+  }
   return { ok: false, status: r.status, code: r.code, error: r.error, hint: dcHint(r.status, r.code) };
 }
 async function botSetRole(uid, roleId, on) {
@@ -241,10 +270,14 @@ function memberAvatar(m) {
 /** ดึงสมาชิกทั้งเซิร์ฟเวอร์ (ต้องเปิด Server Members Intent) */
 async function botListMembers() {
   if (!D.botToken) return { members: [], ok: false, status: 0, error: 'no-token', hint: 'ยังไม่ได้ตั้ง DISCORD_BOT_TOKEN ใน Render' };
+  const hit = cacheGet('members:all');
+  if (hit) return hit;
   const res = await dcFetch(`/guilds/${D.guildId}/members?limit=1000`);
-  if (!res.ok) return { members: [], ok: false, status: res.status, code: res.code, error: res.error || 'unknown', hint: dcHint(res.status, res.code) };
+  if (!res.ok) {
+    return cacheSet('members:all', { members: [], ok: false, status: res.status, code: res.code, error: res.error || 'unknown', hint: dcHint(res.status, res.code) }, 20000);
+  }
   const arr = Array.isArray(res.data) ? res.data : [];
-  return { ok: true, status: 200, error: '', count: arr.length, members: arr.filter((m) => !m.user?.bot).map((m) => ({
+  const out = { ok: true, status: 200, error: '', count: arr.length, members: arr.filter((m) => !m.user?.bot).map((m) => ({
       uid: m.user.id,
       name: m.nick || m.user.global_name || m.user.username,
       avatar: memberAvatar(m),
@@ -258,6 +291,7 @@ async function botListMembers() {
       parkourv2: D.parkourv2RoleId ? (Array.isArray(m.roles) && m.roles.includes(D.parkourv2RoleId)) : false,
       speedrun: D.speedrunRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.speedrunRoleId)) : false,
     })) };
+  return cacheSet('members:all', out, 20000);
 }
 
 /* ---------- ปุ่มรับยศใน Discord (Interactions) ---------- */
@@ -577,6 +611,7 @@ function getCookie(req, name) {
 async function fetchMemberRoles(uid) {
   if (!D.botToken || !uid) return null;
   try {
+    countDcCall();
     const r = await fetch(dcApi(`/guilds/${D.guildId}/members/${uid}`), { headers: botHeaders() });
     if (!r.ok) return null;
     const m = await r.json();
@@ -963,43 +998,57 @@ async function checkDiscordMember(accessToken) {
 
 /** ใช้บอทเช็คยศปัจจุบันของสมาชิก (เรียลไทม์ — ถอดยศแล้วรู้เลย) */
 async function botCheckMember(uid) {
+  const hit = cacheGet('member:' + uid);
+  if (hit) return hit;
+  let out;
   try {
+    countDcCall();
     const r = await fetch(`${DC_BASE}/guilds/${D.guildId}/members/${uid}`, {
       headers: { Authorization: `Bot ${D.botToken}`, 'User-Agent': DC_UA },
     });
-    if (r.status === 404) return { inGuild: false, mooni: false, prime: false };   // ออกจากเซิร์ฟเวอร์แล้ว
-    if (!r.ok) return { error: true };
-    const m = await r.json();
-    const roles = Array.isArray(m.roles) ? m.roles : [];
-    return {
-      inGuild: true,
-      mooni: roles.includes(D.roleId),
-      prime: D.primeRoleId ? roles.includes(D.primeRoleId) : true,
-      mc: D.mcRoleId ? roles.includes(D.mcRoleId) : false,
-      candy: D.candyRoleId ? roles.includes(D.candyRoleId) : false,
-      farmer: D.farmerRoleId ? roles.includes(D.farmerRoleId) : false,
-      diamond: D.diamondRoleId ? roles.includes(D.diamondRoleId) : false,
-      parkour: D.parkourRoleId ? roles.includes(D.parkourRoleId) : false,
-      parkourv2: D.parkourv2RoleId ? roles.includes(D.parkourv2RoleId) : false,
-      speedrun: D.speedrunRoleId ? roles.includes(D.speedrunRoleId) : false,
-      name: m.nick || m.user?.global_name || m.user?.username || '',
-      roles,
-    };
-  } catch { return { error: true }; }
+    if (r.status === 404) out = { inGuild: false, mooni: false, prime: false };   // ออกจากเซิร์ฟเวอร์แล้ว
+    else if (!r.ok) out = { error: true };
+    else {
+      const m = await r.json();
+      const roles = Array.isArray(m.roles) ? m.roles : [];
+      out = {
+        inGuild: true,
+        mooni: roles.includes(D.roleId),
+        prime: D.primeRoleId ? roles.includes(D.primeRoleId) : true,
+        mc: D.mcRoleId ? roles.includes(D.mcRoleId) : false,
+        candy: D.candyRoleId ? roles.includes(D.candyRoleId) : false,
+        farmer: D.farmerRoleId ? roles.includes(D.farmerRoleId) : false,
+        diamond: D.diamondRoleId ? roles.includes(D.diamondRoleId) : false,
+        parkour: D.parkourRoleId ? roles.includes(D.parkourRoleId) : false,
+        parkourv2: D.parkourv2RoleId ? roles.includes(D.parkourv2RoleId) : false,
+        speedrun: D.speedrunRoleId ? roles.includes(D.speedrunRoleId) : false,
+        name: m.nick || m.user?.global_name || m.user?.username || '',
+        roles,
+      };
+    }
+  } catch { out = { error: true }; }
+  return cacheSet('member:' + uid, out);
 }
 
 /** ใช้บอทเช็คยศใน "ดิสที่สอง" — มียศ role2Id = สิทธิ์ถาวรทุกอย่าง (ข้ามเช็ควันหมดอายุ) */
 async function botCheckGuild2(uid) {
   if (!D.botToken || !D.guild2Id || !D.role2Id) return false;
+  const hit = cacheGet('guild2:' + uid);
+  if (hit !== null) return hit;
+  let out = false;
   try {
+    countDcCall();
     const r = await fetch(dcApi(`/guilds/${D.guild2Id}/members/${uid}`), {
       headers: { Authorization: `Bot ${D.botToken}`, 'User-Agent': DC_UA },
     });
-    if (!r.ok) return false;   // ไม่อยู่ดิสที่สอง / API มีปัญหา = ถือว่าไม่มีสิทธิ์พิเศษ
-    const m = await r.json();
-    const roles = Array.isArray(m.roles) ? m.roles : [];
-    return roles.includes(D.role2Id);
-  } catch { return false; }
+    if (!r.ok) out = false;   // ไม่อยู่ดิสที่สอง / API มีปัญหา = ถือว่าไม่มีสิทธิ์พิเศษ
+    else {
+      const m = await r.json();
+      const roles = Array.isArray(m.roles) ? m.roles : [];
+      out = roles.includes(D.role2Id);
+    }
+  } catch { out = false; }
+  return cacheSet('guild2:' + uid, out);
 }
 
 /** จัดการทุก request ที่ขึ้นต้น /auth — คืน true ถ้าจัดการแล้ว */
@@ -2332,7 +2381,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({
       ok: true, clients: wss.clients.size, authEnabled: AUTH_ENABLED,
-      bot: !!D.botToken, store: STORE_ENABLED,
+      bot: !!D.botToken, store: STORE_ENABLED, dcCalls,
       publicKey: !!D.publicKey, publicKeyLen: D.publicKey.length,
       muffinToken: !!M.botToken, muffinKey: !!M.publicKey, muffinKeyLen: M.publicKey.length,
       autoSlip: AUTO_SLIP, freeQr: FREE_QR_AVAILABLE, ocr: OCR_AVAILABLE,
