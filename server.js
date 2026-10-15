@@ -2299,6 +2299,7 @@ const server = http.createServer((req, res) => {
       publicKey: !!D.publicKey, publicKeyLen: D.publicKey.length,
       muffinToken: !!M.botToken, muffinKey: !!M.publicKey, muffinKeyLen: M.publicKey.length,
       autoSlip: AUTO_SLIP, freeQr: FREE_QR_AVAILABLE, ocr: OCR_AVAILABLE,
+      discord: discordHealth,   // สถานะล่าสุดที่ relay คุยกับดิสคอร์ดได้ (ไม่มีข้อมูลลับ)
     }));
   }
 
@@ -2517,17 +2518,28 @@ function broadcast(msg) {
   return n;
 }
 
-/* ---------- ตรวจสุขภาพดิสคอร์ดเป็นระยะ — ดูผลได้ใน log ของ Render ---------- */
+/* ---------- ตรวจสุขภาพดิสคอร์ดเป็นระยะ — ดูผลได้ใน log ของ Render และใน /health ---------- */
+let discordHealth = { ok: null, status: 0, checkedAt: 0 };
 async function logDiscordHealth() {
-  if (!D.botToken) { console.log('[discord] ยังไม่ได้ตั้ง DISCORD_BOT_TOKEN'); return; }
+  if (!D.botToken) {
+    console.log('[discord] ยังไม่ได้ตั้ง DISCORD_BOT_TOKEN');
+    discordHealth = { ok: false, status: 0, code: 'no-token', checkedAt: Date.now() };
+    return;
+  }
   const me = await dcFetch('/users/@me');
   if (!me.ok) {
     console.log('[discord] บอทล็อกอินไม่ได้: ' + dcErrText(me) + ' → ' + dcHint(me.status, me.code));
+    discordHealth = { ok: false, status: me.status, code: me.code, reason: String(me.error || '').slice(0, 120), checkedAt: Date.now() };
     return;
   }
   const m = await dcFetch('/guilds/' + D.guildId + '/members?limit=1');
   console.log('[discord] บอท ' + me.data.username + ' · เซิร์ฟเวอร์ ' + D.guildId + ' → '
     + (m.ok ? 'ดึงรายชื่อสมาชิกได้' : dcErrText(m) + ' → ' + dcHint(m.status, m.code)));
+  discordHealth = {
+    ok: m.ok, status: m.status, code: m.code || 0,
+    reason: m.ok ? '' : String(m.error || '').slice(0, 120),
+    membersOk: !!m.ok, checkedAt: Date.now(),
+  };
 }
 setTimeout(() => logDiscordHealth().catch(() => {}), 8000).unref?.();
 setInterval(() => logDiscordHealth().catch(() => {}), 10 * 60 * 1000).unref?.();
