@@ -13,7 +13,25 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 4000;
-const ADMIN_KEY = process.env.ADMIN_KEY || '';
+
+/* ==================================================================
+ * ทำความสะอาดค่าที่อ่านจาก environment
+ * ปัญหาที่เจอบ่อย: ก๊อปค่าจาก Discord/Upstash มาวางใน Render แล้วติดช่องว่าง
+ * หรือขึ้นบรรทัดใหม่ หรืออัญประกาศ ทำให้ไอดี/โทเคนเพี้ยนไป 1 ตัว
+ * → ดิสคอร์ดตอบ 401/404 แล้วทั้งระบบดูเหมือน "เชื่อมกับดิสไม่ได้"
+ * (ค่าที่ถูกแก้จะถูกจดชื่อไว้ โชว์ได้ในหน้าตรวจระบบ)
+ * ================================================================== */
+const ENV_FIXED = [];
+function envOf(key, { token = false, digits = false } = {}) {
+  const raw = String(process.env[key] ?? '');
+  let s = raw.trim().replace(/^['"]+|['"]+$/g, '').trim();
+  if (token) s = s.replace(/^bot\s+/i, '').replace(/\s+/g, '');   // โทเคนไม่มีช่องว่าง
+  if (digits) s = s.replace(/\D/g, '');                           // ไอดิสคอร์ดเป็นตัวเลขล้วน
+  if (s && s !== raw) ENV_FIXED.push(key);
+  return s;
+}
+
+const ADMIN_KEY = envOf('ADMIN_KEY');
 
 /* ==================================================================
  * ล็อกอิน Discord + เช็คยศ "Mooni" (Discord role gate)
@@ -27,37 +45,37 @@ const ADMIN_KEY = process.env.ADMIN_KEY || '';
  * ถ้ายังไม่ตั้งครบ แอปจะเปิดใช้ได้ตามปกติ (ไม่ล็อก) จนกว่าจะตั้งครบ
  * ================================================================== */
 const D = {
-  clientId: process.env.DISCORD_CLIENT_ID || '',
-  clientSecret: process.env.DISCORD_CLIENT_SECRET || '',
-  guildId: process.env.DISCORD_GUILD_ID || '',
-  roleId: process.env.DISCORD_ROLE_ID || '',
-  primeRoleId: process.env.DISCORD_PRIME_ROLE_ID || '',   // ยศ Mooni Pro (ปลดล็อก Overlay/Sound)
-  mcRoleId: process.env.DISCORD_MC_ROLE_ID || '1538119728759832636',   // ยศ Minecraft (ปลดล็อกหน้า Minecraft)
-  candyRoleId: process.env.DISCORD_CANDY_ROLE_ID || '1533367941691867236',   // ยศ Candy Block (ปลดล็อกการ์ด Candy Block ในหน้า Minecraft)
-  farmerRoleId: process.env.DISCORD_FARMER_ROLE_ID || '1538127407096270929',   // ยศ Farmer (ปลดล็อกการ์ดแมพ Farmer ในหน้า Minecraft)
-  diamondRoleId: process.env.DISCORD_DIAMOND_ROLE_ID || '1541417750927376475',   // ยศ Diamond (ปลดล็อกการ์ด Mooni Diamond ในหน้า Minecraft)
-  parkourRoleId: process.env.DISCORD_PARKOUR_ROLE_ID || '1550867888531968170',
-  parkourv2RoleId: process.env.DISCORD_PARKOURV2_ROLE_ID || '1556990934401683507',   // ยศ Parkour V2 (ปลดล็อกการ์ด Parkour V2)
-  speedrunRoleId: process.env.DISCORD_SPEEDRUN_ROLE_ID || '1551020999070322698',   // ยศ Diamond Speedrun (ปลดล็อกการ์ด Diamond Speedrun)   // ยศ Parkour (ปลดล็อกการ์ด Parkour V1 ในหน้า Minecraft)
-  botToken: process.env.DISCORD_BOT_TOKEN || '',          // โทเคนบอท — ใช้เช็คยศสดแบบเรียลไทม์ (ถอดยศแล้วรู้ทันที)
+  clientId: envOf('DISCORD_CLIENT_ID', { digits: true }),
+  clientSecret: envOf('DISCORD_CLIENT_SECRET', { token: true }),
+  guildId: envOf('DISCORD_GUILD_ID', { digits: true }),
+  roleId: envOf('DISCORD_ROLE_ID', { digits: true }),
+  primeRoleId: envOf('DISCORD_PRIME_ROLE_ID', { digits: true }),   // ยศ Mooni Pro (ปลดล็อก Overlay/Sound)
+  mcRoleId: envOf('DISCORD_MC_ROLE_ID', { digits: true }) || '1538119728759832636',   // ยศ Minecraft (ปลดล็อกหน้า Minecraft)
+  candyRoleId: envOf('DISCORD_CANDY_ROLE_ID', { digits: true }) || '1533367941691867236',   // ยศ Candy Block (ปลดล็อกการ์ด Candy Block ในหน้า Minecraft)
+  farmerRoleId: envOf('DISCORD_FARMER_ROLE_ID', { digits: true }) || '1538127407096270929',   // ยศ Farmer (ปลดล็อกการ์ดแมพ Farmer ในหน้า Minecraft)
+  diamondRoleId: envOf('DISCORD_DIAMOND_ROLE_ID', { digits: true }) || '1541417750927376475',   // ยศ Diamond (ปลดล็อกการ์ด Mooni Diamond ในหน้า Minecraft)
+  parkourRoleId: envOf('DISCORD_PARKOUR_ROLE_ID', { digits: true }) || '1550867888531968170',
+  parkourv2RoleId: envOf('DISCORD_PARKOURV2_ROLE_ID', { digits: true }) || '1556990934401683507',   // ยศ Parkour V2 (ปลดล็อกการ์ด Parkour V2)
+  speedrunRoleId: envOf('DISCORD_SPEEDRUN_ROLE_ID', { digits: true }) || '1551020999070322698',   // ยศ Diamond Speedrun (ปลดล็อกการ์ด Diamond Speedrun)   // ยศ Parkour (ปลดล็อกการ์ด Parkour V1 ในหน้า Minecraft)
+  botToken: envOf('DISCORD_BOT_TOKEN', { token: true }),          // โทเคนบอท — ใช้เช็คยศสดแบบเรียลไทม์ (ถอดยศแล้วรู้ทันที)
   /* ดิสที่สอง (เช็คด้วยบอท) — มียศนี้ในดิสที่สอง = เข้าแอปได้ถาวร ปลดล็อกทุกหน้า/ทุกแมพ ข้ามเช็ควันหมดอายุ */
-  guild2Id: process.env.DISCORD_GUILD2_ID || '1549377539431206962',
-  role2Id: process.env.DISCORD_ROLE2_ID || '1550085695110914089',
-  publicKey: process.env.DISCORD_PUBLIC_KEY || '',        // Public Key ของแอป — ใช้ตรวจลายเซ็นปุ่มกดจาก Discord
-  invite: process.env.DISCORD_INVITE || '',
+  guild2Id: envOf('DISCORD_GUILD2_ID', { digits: true }) || '1549377539431206962',
+  role2Id: envOf('DISCORD_ROLE2_ID', { digits: true }) || '1550085695110914089',
+  publicKey: envOf('DISCORD_PUBLIC_KEY', { token: true }),        // Public Key ของแอป — ใช้ตรวจลายเซ็นปุ่มกดจาก Discord
+  invite: envOf('DISCORD_INVITE'),
 };
 /* บอทตัวที่สอง "☁️Muffin" — ระบบ ticket (ถ้าไม่ตั้ง จะใช้บอท Mooni ตัวเดิมแทน) */
 const M = {
-  botToken: process.env.MUFFIN_BOT_TOKEN || '',
-  publicKey: process.env.MUFFIN_PUBLIC_KEY || '',
+  botToken: envOf('MUFFIN_BOT_TOKEN', { token: true }),
+  publicKey: envOf('MUFFIN_PUBLIC_KEY', { token: true }),
 };
 const muffinToken = () => M.botToken || D.botToken;
 const muffinKey = () => M.publicKey || D.publicKey;
 
-const AUTH_SECRET = process.env.AUTH_SECRET || crypto.randomBytes(24).toString('hex');
+const AUTH_SECRET = envOf('AUTH_SECRET') || crypto.randomBytes(24).toString('hex');
 const SESSION_DAYS = 3;   // บัตรผ่านหมดอายุแล้วต้องล็อกอินใหม่ (เช็คยศซ้ำ) ทุกกี่วัน
 const AUTH_ENABLED = !!(D.clientId && D.clientSecret && D.guildId && D.roleId);
-const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+const PUBLIC_URL = (envOf('PUBLIC_URL') || envOf('RENDER_EXTERNAL_URL') || `http://localhost:${PORT}`).replace(/\/$/, '');
 const REDIRECT_URI = `${PUBLIC_URL}/auth/callback`;
 
 /* ==================================================================
@@ -67,8 +85,8 @@ const REDIRECT_URI = `${PUBLIC_URL}/auth/callback`;
  *   exp = เวลาหมดอายุเป็น ms | 0 = ถาวร | ไม่มี record = ถาวร (ยังไม่จำกัดเวลา)
  * ================================================================== */
 const UP = {
-  url: (process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/$/, ''),
-  token: process.env.UPSTASH_REDIS_REST_TOKEN || '',
+  url: envOf('UPSTASH_REDIS_REST_URL').replace(/\/$/, ''),
+  token: envOf('UPSTASH_REDIS_REST_TOKEN', { token: true }),
 };
 const STORE_ENABLED = !!(UP.url && UP.token);
 
@@ -114,15 +132,66 @@ function accessActive(rec) {
 const dcApi = (path) => `https://discord.com/api/v10${path}`;
 const botHeaders = () => ({ Authorization: `Bot ${D.botToken}`, 'Content-Type': 'application/json' });
 
-async function botSetRole(uid, roleId, on) {
-  if (!D.botToken || !roleId) return false;
+/**
+ * เรียก Discord API แล้วคืนผลพร้อม "สาเหตุจริง"
+ * เดิมโค้ดกลืน error เงียบ ๆ (คืน [] / false) ทำให้เวลาดิสเชื่อมไม่ได้
+ * หน้าจัดการสมาชิกจะโชว์ว่าว่างเปล่าโดยไม่บอกว่าเกิดอะไรขึ้น
+ */
+async function dcFetch(path, { token = D.botToken, method = 'GET', body } = {}) {
+  const out = { ok: false, status: 0, code: 0, error: '', data: null };
+  if (!token) { out.error = 'no-token'; return out; }
   try {
-    const r = await fetch(dcApi(`/guilds/${D.guildId}/members/${uid}/roles/${roleId}`), {
-      method: on ? 'PUT' : 'DELETE',
-      headers: botHeaders(),
+    const r = await fetch(dcApi(path), {
+      method,
+      headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
-    return r.ok || r.status === 204;
-  } catch { return false; }
+    out.status = r.status;
+    out.ok = r.ok;
+    if (r.status !== 204) {
+      const txt = await r.text();
+      try { out.data = JSON.parse(txt); } catch { out.data = null; out.raw = String(txt).slice(0, 300); }
+    }
+    if (!r.ok) {
+      out.code = out.data?.code || 0;
+      out.error = out.data?.message || out.raw || ('HTTP ' + out.status);
+    }
+  } catch (e) { out.error = 'network: ' + (e?.message || e); }
+  return out;
+}
+
+/** ข้อความ error ให้อ่านง่าย (กัน "HTTP 401 401: Unauthorized" ซ้ำซ้อน) */
+function dcErrText(api) {
+  const st = api?.status || 0;
+  const msg = String(api?.error || 'unknown');
+  if (!st) return msg;
+  return msg.startsWith(String(st)) ? msg : 'HTTP ' + st + ' ' + msg;
+}
+
+/** แปลงรหัส error ของดิสคอร์ด เป็นคำแนะนำที่แก้ได้จริง */
+function dcHint(status, code) {
+  if (!status) return 'ติดต่อ discord.com ไม่ได้จากเซิร์ฟเวอร์นี้ — เช็คเครือข่าย/ดู log บน Render';
+  if (status === 401) return 'โทเคนบอทไม่ถูกต้องหรือถูกยกเลิก — Discord Developer Portal → Bot → Reset Token แล้วอัปเดตค่าใน Render (DISCORD_BOT_TOKEN / MUFFIN_BOT_TOKEN) แล้ว Redeploy';
+  if (status === 403 && code === 50001) return 'บอทไม่เห็นข้อมูลนี้ — เช็คว่าเชิญบอทเข้าเซิร์ฟเวอร์แล้ว และเปิด Server Members Intent (ถ้าเป็นเรื่องรายชื่อสมาชิก)';
+  if (status === 403 && code === 50013) return 'บอทขาดสิทธิ์ — ตั้ง Manage Roles / Manage Channels และลากยศบอทให้สูงกว่ายศที่บอทจะจัดการ';
+  if (status === 403) return 'ถูกปฏิเสธสิทธิ์ (403) — เช็คสิทธิ์บอทและ intent ในหน้า Developer Portal';
+  if (status === 404 && code === 10004) return 'ไม่พบเซิร์ฟเวอร์ — ไอดี DISCORD_GUILD_ID ไม่ถูกต้อง หรือบอทไม่ได้อยู่ในเซิร์ฟเวอร์นั้น';
+  if (status === 404 && code === 10003) return 'ไม่พบห้อง/หมวดหมู่นี้ — ไอดีห้องผิด หรือบอทไม่เห็นห้องนั้น';
+  if (status === 404 && code === 10011) return 'ไม่พบยศนี้ — ไอดียศผิด หรือยศถูกลบไปแล้ว';
+  if (status === 429) return 'โดนจำกัดอัตราเรียก (rate limit) — รอสักครู่แล้วลองใหม่';
+  return 'ดูข้อความจากดิสคอร์ดด้านบน';
+}
+
+/** ให้/ถอดยศ พร้อมรายละเอียดว่าล้มเพราะอะไร */
+async function botSetRoleDetail(uid, roleId, on) {
+  if (!D.botToken || !roleId) return { ok: false, status: 0, code: 0, error: 'no-token-or-role', hint: '' };
+  const r = await dcFetch(`/guilds/${D.guildId}/members/${uid}/roles/${roleId}`, { method: on ? 'PUT' : 'DELETE' });
+  if (r.ok) return { ok: true, status: r.status, code: 0, error: '', hint: '' };
+  return { ok: false, status: r.status, code: r.code, error: r.error, hint: dcHint(r.status, r.code) };
+}
+async function botSetRole(uid, roleId, on) {
+  const r = await botSetRoleDetail(uid, roleId, on);
+  return r.ok;
 }
 
 function memberAvatar(m) {
@@ -134,12 +203,11 @@ function memberAvatar(m) {
 
 /** ดึงสมาชิกทั้งเซิร์ฟเวอร์ (ต้องเปิด Server Members Intent) */
 async function botListMembers() {
-  if (!D.botToken) return [];
-  try {
-    const r = await fetch(dcApi(`/guilds/${D.guildId}/members?limit=1000`), { headers: botHeaders() });
-    if (!r.ok) return [];
-    const arr = await r.json();
-    return arr.filter((m) => !m.user?.bot).map((m) => ({
+  if (!D.botToken) return { members: [], ok: false, status: 0, error: 'no-token', hint: 'ยังไม่ได้ตั้ง DISCORD_BOT_TOKEN ใน Render' };
+  const res = await dcFetch(`/guilds/${D.guildId}/members?limit=1000`);
+  if (!res.ok) return { members: [], ok: false, status: res.status, code: res.code, error: res.error || 'unknown', hint: dcHint(res.status, res.code) };
+  const arr = Array.isArray(res.data) ? res.data : [];
+  return { ok: true, status: 200, error: '', count: arr.length, members: arr.filter((m) => !m.user?.bot).map((m) => ({
       uid: m.user.id,
       name: m.nick || m.user.global_name || m.user.username,
       avatar: memberAvatar(m),
@@ -152,8 +220,7 @@ async function botListMembers() {
       parkour: D.parkourRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.parkourRoleId)) : false,
       parkourv2: D.parkourv2RoleId ? (Array.isArray(m.roles) && m.roles.includes(D.parkourv2RoleId)) : false,
       speedrun: D.speedrunRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.speedrunRoleId)) : false,
-    }));
-  } catch { return []; }
+    })) };
 }
 
 /* ---------- ปุ่มรับยศใน Discord (Interactions) ---------- */
@@ -234,7 +301,7 @@ const hdr = (token) => ({ Authorization: `Bot ${token}`, 'Content-Type': 'applic
  * เช่น TICKET_STAFF_ROLES=1484626455928373279,1484626578943246518
  */
 const TICKET_STAFF_EXTRA = String(process.env.TICKET_STAFF_ROLES || '')
-  .split(',').map((s) => s.trim()).filter(Boolean);
+  .split(',').map((s) => s.replace(/\D/g, '')).filter(Boolean);
 
 /** รวมยศทีมงานทั้งจากปุ่มและจาก env */
 const staffRoleSet = (fromButton) => new Set([...(fromButton || []), ...TICKET_STAFF_EXTRA]);
@@ -449,7 +516,7 @@ async function doShopAdmin(action, data) {
 
 /* ---------- ล็อกอินหลังบ้านร้าน (ผ่านยศ Discord แทนรหัสแอดมิน) ---------- */
 const SHOP_ADMIN_ROLES = String(process.env.SHOP_ADMIN_ROLES || '1484626578943246518,1484626455928373279')
-  .split(',').map((s) => s.trim()).filter(Boolean);
+  .split(',').map((s) => s.replace(/\D/g, '')).filter(Boolean);
 
 function signShopCookie(payload) {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -494,7 +561,7 @@ async function shopAdminFromReq(req) {
 const orderThrottle = new Map();
 
 /* ---------- ตรวจสลิปอัตโนมัติ (EasySlip) ---------- */
-const EASYSLIP_TOKEN = process.env.EASYSLIP_TOKEN || '';
+const EASYSLIP_TOKEN = envOf('EASYSLIP_TOKEN', { token: true });
 const AUTO_SLIP = !!EASYSLIP_TOKEN;
 
 /* ---------- โหมดฟรี: อ่าน QR ในสลิปเอง (pure-JS ไม่ต้องต่อ API) ---------- */
@@ -1236,6 +1303,15 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   #login input{width:100%;margin-bottom:12px}
   #login .btn{width:100%;padding:12px}
   .msg{font-size:12.5px;color:var(--red);min-height:16px;margin:8px 0}
+  .warn{background:rgba(255,107,127,.12);border:1.5px solid rgba(255,107,127,.45);
+    border-radius:14px;padding:12px 14px;margin:0 0 14px;font-size:12.5px;line-height:1.65;color:#ffd9df}
+  .diag{margin:0 0 14px;padding:14px 16px;border-radius:14px;background:var(--card);
+    border:1.5px solid var(--line);font-size:12.5px;display:flex;flex-direction:column;gap:9px}
+  .diag b.t{color:var(--accent);font-size:13.5px}
+  .diag .row{display:flex;gap:9px;align-items:flex-start}
+  .diag .row i{font-style:normal;flex:none;font-weight:600}
+  .diag .row span{color:var(--muted)}
+  .diag .ok{color:var(--green)}.diag .bad{color:var(--red)}
   .hidden{display:none}
   .count{font-size:12.5px;color:var(--muted)}
   .rb{margin-bottom:14px;background:var(--card);border:1.5px solid var(--line);
@@ -1377,9 +1453,12 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   <section class="pane on" data-pane="members">
     <div class="bar">
       <input id="search" placeholder="🔎 ค้นหาชื่อสมาชิก…" style="flex:1;min-width:170px">
+      <button class="btn" id="diagBtn">🩺 ตรวจระบบ</button>
       <button class="btn" id="refresh">↻ รีเฟรช</button>
     </div>
     <div class="msg" id="pmsg"></div>
+    <div class="warn hidden" id="warn"></div>
+    <div class="diag hidden" id="diag"></div>
     <div class="cards" id="cards"></div>
   </section>
 
@@ -1564,6 +1643,10 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   async function load(){
     try{
       const d=await call('/panel/members',{});members=d.members||[];render();$('pmsg').textContent='';
+      const w=$('warn');
+      w.textContent=d.warning?'⚠️ '+d.warning:'';
+      if(d.storeCounts)w.textContent+=(w.textContent?' · ':'')+'ข้อมูลในคลัง: สิทธิ์ใช้แอป '+d.storeCounts.access+' รายการ · วันหมดอายุยศ '+d.storeCounts.roleExp+' รายการ';
+      w.classList.toggle('hidden',!w.textContent.trim());
       if(cur){                                   // หน้าต่างเปิดอยู่ → อัปเดตข้อมูลสดในหน้าต่างด้วย
         const uid=cur.uid;
         cur=members.find(m=>m.uid===uid)||null;
@@ -1734,6 +1817,16 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
 
   $('search').addEventListener('input',render);
   $('refresh').addEventListener('click',load);
+
+  /* ---------- ปุ่มตรวจระบบ: หาสาเหตุที่ดิสเชื่อมไม่ได้ ---------- */
+  $('diagBtn').addEventListener('click',async()=>{
+    const box=$('diag');box.classList.remove('hidden');box.textContent='กำลังตรวจ…';
+    try{
+      const d=await call('/panel/diag',{ticketChannel:$('tkChannel').value.trim(),ticketCategory:$('tkCat').value.trim()});
+      box.innerHTML='<b class="t">ผลตรวจระบบ</b>'+(d.checks||[]).map(c=>
+        '<div class="row"><i class="'+(c.ok?'ok':'bad')+'">'+(c.ok?'✅':'❌')+' '+esc(c.label)+'</i><span>'+esc(c.msg||'')+'</span></div>').join('');
+    }catch(e){box.innerHTML='<b class="t">ผลตรวจระบบ</b><div class="row"><i class="bad">❌ ตรวจไม่ได้: '+esc(e.message)+'</i></div>';}
+  });
   $('rbSend').addEventListener('click',async()=>{
     const b=$('rbSend');b.disabled=true;$('rbMsg').style.color='#8ea6cc';$('rbMsg').textContent='กำลังส่ง…';
     try{
@@ -1755,7 +1848,8 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     finally{b.disabled=false;}
   });
   $('enter').addEventListener('click',async()=>{
-    KEY=$('key').value.trim();localStorage.setItem('mooniKey',KEY);
+    const typed=$('key').value.trim();if(typed)KEY=typed;   // อย่าล้างรหัสที่จำไว้ เมื่อกดเข้าซ้ำ/เข้าอัตโนมัติ
+    localStorage.setItem('mooniKey',KEY);
     try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();loadShop();loadMaps();setInterval(()=>{if(!cur)load();},15000);}
     catch(e){$('lmsg').textContent=e.message;}
   });
@@ -1932,11 +2026,12 @@ async function handlePanel(pathname, data) {
   if (!D.botToken) return { code: 400, body: { error: 'ยังไม่ได้ตั้งบอท (DISCORD_BOT_TOKEN)' } };
 
   if (pathname === '/panel/members') {
-    const [list, accessMap, roleExpMap] = await Promise.all([
+    const [listRes, accessMap, roleExpMap] = await Promise.all([
       botListMembers(),
       STORE_ENABLED ? getAccessMap() : {},
       STORE_ENABLED ? getRoleExpMap() : {},
     ]);
+    const list = listRes.members || [];
     const now = Date.now();
     const roleIdMap = { mc: D.mcRoleId, mooni: D.roleId, prime: D.primeRoleId, candy: D.candyRoleId, farmer: D.farmerRoleId, diamond: D.diamondRoleId, parkour: D.parkourRoleId, parkourv2: D.parkourv2RoleId, speedrun: D.speedrunRoleId };
     const members = list.map((m) => ({
@@ -1955,13 +2050,151 @@ async function handlePanel(pathname, data) {
     }));
     // เรียง: ออนไลน์ก่อน แล้วตามชื่อ
     members.sort((a, b) => (b.active - a.active) || a.name.localeCompare(b.name));
-    return { code: 200, body: { members } };
+    // บอกด้วยว่าถ้ารายชื่อว่างเพราะติดต่อดิสไม่ได้ (เดิมเงียบ ทำให้ดูเหมือนข้อมูลหาย)
+    const warning = listRes.ok
+      ? (list.length ? '' : 'ติดต่อดิสคอร์ดได้แต่ไม่พบสมาชิก — เช็คว่าบอทอยู่ในเซิร์ฟเวอร์ที่ตั้งไว้จริง')
+      : ('เชื่อมดิสคอร์ดไม่ได้: ' + dcErrText(listRes) + (listRes.hint ? ' | ' + listRes.hint : ''));
+    return {
+      code: 200,
+      body: {
+        members, discordOk: !!listRes.ok, discordCount: listRes.count || 0, warning,
+        storeCounts: { access: Object.keys(accessMap).length, roleExp: Object.keys(roleExpMap).length },
+      },
+    };
+  }
+
+  /* ---------- ตรวจระบบ: บอกว่าติดตรงไหน (บอท · ดิสคอร์ด · ที่เก็บข้อมูล) ---------- */
+  if (pathname === '/panel/diag') {
+    const checks = [];
+    const add = (ok, label, msg) => checks.push({ ok: !!ok, label, msg: msg || '' });
+
+    // 1) env ที่ตั้งไว้ + ค่าที่ถูกทำความสะอาด
+    const envKeys = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_GUILD_ID', 'DISCORD_ROLE_ID', 'DISCORD_BOT_TOKEN', 'DISCORD_PUBLIC_KEY', 'MUFFIN_BOT_TOKEN', 'UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN', 'AUTH_SECRET', 'ADMIN_KEY'];
+    const missing = envKeys.filter((k) => !String(process.env[k] || '').trim());
+    add(!missing.length, 'ค่าตั้งต้น (env)',
+      (missing.length ? 'ยังไม่ได้ตั้ง: ' + missing.join(', ') : 'ตั้งครบทั้ง ' + envKeys.length + ' ตัว')
+      + (ENV_FIXED.length ? ' · แก้ช่องว่าง/อัญประกาศให้แล้ว: ' + ENV_FIXED.join(', ') : ''));
+
+    // 2) ที่เก็บข้อมูลถาวร
+    let accessCount = 0, roleExpCount = 0;
+    if (!STORE_ENABLED) {
+      add(false, 'ที่เก็บข้อมูล Upstash', 'ยังไม่ได้ตั้ง UPSTASH_REDIS_REST_URL / TOKEN — วันหมดอายุจะไม่ถูกจำ');
+    } else {
+      const [am, rm] = await Promise.all([getAccessMap(), getRoleExpMap()]);
+      accessCount = Object.keys(am).length;
+      roleExpCount = Object.keys(rm).length;
+      const w = await upstash(['SET', 'mooni:selftest', String(Date.now())]);
+      const r = await upstash(['GET', 'mooni:selftest']);
+      await upstash(['DEL', 'mooni:selftest']);
+      const bad = w?.error || r?.error;
+      add(!bad, 'ที่เก็บข้อมูล Upstash', bad
+        ? ('เชื่อมไม่ได้: ' + bad)
+        : ('เขียน/อ่านได้ · ข้อมูลที่เก็บอยู่: สิทธิ์ใช้แอป ' + accessCount + ' รายการ · วันหมดอายุยศ ' + roleExpCount + ' รายการ'));
+    }
+
+    // 3) บอท Mooni ล็อกอิน
+    const me = await dcFetch('/users/@me');
+    add(me.ok, 'บอท Mooni ล็อกอิน', !D.botToken ? 'ยังไม่ได้ตั้ง DISCORD_BOT_TOKEN'
+      : me.ok ? ('บัญชี ' + me.data.username + ' (id ' + me.data.id + ')')
+      : (dcErrText(me) + ' | ' + dcHint(me.status, me.code)));
+
+    // 4) เซิร์ฟเวอร์หลัก + ดิสที่สอง
+    const g1 = await dcFetch(`/guilds/${D.guildId}`);
+    add(g1.ok, 'เซิร์ฟเวอร์หลัก', !D.guildId ? 'ยังไม่ได้ตั้ง DISCORD_GUILD_ID'
+      : g1.ok ? (g1.data.name + ' (id ' + g1.data.id + ')')
+      : (dcErrText(g1) + ' | ' + dcHint(g1.status, g1.code)));
+    const g2 = await dcFetch(`/guilds/${D.guild2Id}`);
+    add(g2.ok, 'ดิสที่สอง (สิทธิ์ถาวร)', g2.ok ? (g2.data.name + ' (id ' + g2.data.id + ')')
+      : (dcErrText(g2) + ' | ' + dcHint(g2.status, g2.code)));
+
+    // 5) สิทธิ์บอท + ยศที่บอทให้ไม่ได้
+    const rolesRes = await dcFetch(`/guilds/${D.guildId}/roles`);
+    const gRoles = Array.isArray(rolesRes.data) ? rolesRes.data : [];
+    const meMember = me.ok ? await dcFetch(`/guilds/${D.guildId}/members/${me.data.id}`) : { ok: false, data: null };
+    const myRoles = Array.isArray(meMember.data?.roles) ? meMember.data.roles : [];
+    const bits = gRoles.reduce((acc, r) => ((myRoles.includes(r.id) || r.id === D.guildId) ? acc | BigInt(r.permissions || 0) : acc), 0n);
+    const isAdmin = (bits & 8n) === 8n;
+    const canRoles = isAdmin || (bits & 268435456n) === 268435456n;
+    const canChannels = isAdmin || (bits & 16n) === 16n;
+    const myTop = gRoles.filter((r) => myRoles.includes(r.id)).reduce((m, r) => Math.max(m, r.position || 0), 0);
+    const managed = [['Mooni', D.roleId], ['Mooni Pro', D.primeRoleId], ['Minecraft', D.mcRoleId], ['Candy', D.candyRoleId], ['Farmer', D.farmerRoleId], ['Diamond', D.diamondRoleId], ['Parkour', D.parkourRoleId], ['Parkour V2', D.parkourv2RoleId], ['Speedrun', D.speedrunRoleId]].filter(([, id]) => id);
+    const notFound = managed.filter(([, id]) => !gRoles.some((r) => r.id === id)).map(([n]) => n);
+    const under = managed.filter(([, id]) => { const r = gRoles.find((x) => x.id === id); return r && (r.position || 0) >= myTop; }).map(([n]) => n);
+    add(rolesRes.ok && canRoles && canChannels && !under.length && !notFound.length, 'สิทธิ์บอท + ลำดับยศ',
+      !rolesRes.ok ? ('ตรวจไม่ได้: ' + dcErrText(rolesRes)) :
+      (canRoles ? 'Manage Roles ✓' : 'Manage Roles ✗') + ' · ' + (canChannels ? 'Manage Channels ✓' : 'Manage Channels ✗')
+      + (under.length ? ' · ยศที่บอทให้ไม่ได้ (ยศบอทอยู่ต่ำกว่า): ' + under.join(', ') : '')
+      + (notFound.length ? ' · ไม่พบยศนี้ในเซิร์ฟเวอร์: ' + notFound.join(', ') : ''));
+
+    // 6) ดึงรายชื่อสมาชิก (ต้องเปิด Server Members Intent)
+    const mem = await dcFetch(`/guilds/${D.guildId}/members?limit=1`);
+    add(mem.ok, 'ดึงรายชื่อสมาชิก', mem.ok
+      ? ('ได้ ' + (Array.isArray(mem.data) ? mem.data.length : 0) + ' รายการ (ทดสอบ 1 รายการ)')
+      : (dcErrText(mem) + ' | ' + dcHint(mem.status, mem.code)));
+
+    // 7) บอท Muffin (ticket) + ห้อง/หมวดหมู่ที่ใช้
+    if (M.botToken) {
+      const mm = await dcFetch('/users/@me', { token: M.botToken });
+      const inGuild = mm.ok ? await dcFetch(`/guilds/${D.guildId}/members/${mm.data.id}`, { token: M.botToken }) : { ok: false, status: mm.status, code: mm.code, error: mm.error };
+      add(mm.ok && inGuild.ok, 'บอท Muffin (ticket)', !mm.ok
+        ? (dcErrText(mm) + ' | ' + dcHint(mm.status, mm.code))
+        : inGuild.ok ? ('บัญชี ' + mm.data.username + ' · อยู่ในเซิร์ฟเวอร์ ✓')
+        : ('ไม่อยู่ในเซิร์ฟเวอร์/ไม่มีสิทธิ์: ' + dcErrText(inGuild) + ' | ' + dcHint(inGuild.status, inGuild.code)));
+    } else {
+      add(true, 'บอท Muffin (ticket)', 'ไม่ได้ตั้ง MUFFIN_BOT_TOKEN — ใช้บอท Mooni ตัวเดิม' );
+    }
+    const tkCh = String(data.ticketChannel || '').trim();
+    const tkCat = String(data.ticketCategory || '').trim();
+    if (/^\d{5,}$/.test(tkCh)) {
+      const c = await dcFetch('/channels/' + tkCh, { token: muffinToken() });
+      add(c.ok, 'ห้องวางปุ่ม Ticket', c.ok ? ('#' + (c.data.name || tkCh)) : (dcErrText(c) + ' | ' + dcHint(c.status, c.code)));
+    }
+    if (/^\d{5,}$/.test(tkCat)) {
+      const c = await dcFetch('/channels/' + tkCat, { token: muffinToken() });
+      add(c.ok, 'หมวดหมู่สร้างห้อง Ticket', c.ok ? (c.data.name || tkCat) : (dcErrText(c) + ' | ' + dcHint(c.status, c.code)));
+    }
+
+    // 8) ลิงก์ชวนเข้าเซิร์ฟเวอร์ (ใช้ได้อยู่ไหม — เช็คได้โดยไม่ต้องมีโทเคน)
+    if (D.invite) {
+      const code = (D.invite.match(/(?:discord\.gg|discord(?:app)?\.com\/invite)\/([A-Za-z0-9-]+)/) || [])[1];
+      if (!code) {
+        add(false, 'ลิงก์ชวนเข้าเซิร์ฟเวอร์', 'รูปแบบไม่ถูกต้อง: ' + D.invite);
+      } else {
+        let inv = { ok: false, status: 0, code: 0, error: '', data: null };
+        try {
+          const r = await fetch('https://discord.com/api/v10/invites/' + code + '?with_counts=true');
+          inv.status = r.status;
+          inv.ok = r.ok;
+          inv.data = await r.json().catch(() => null);
+          if (!r.ok) { inv.code = inv.data?.code || 0; inv.error = inv.data?.message || ('HTTP ' + r.status); }
+        } catch (e) { inv.error = 'network: ' + (e?.message || e); }
+        add(inv.ok, 'ลิงก์ชวนเข้าเซิร์ฟเวอร์', inv.ok
+          ? ('ใช้ได้ · เซิร์ฟเวอร์ ' + (inv.data.guild?.name || '?') + ' (id ' + (inv.data.guild?.id || '?') + ') · สมาชิก ~' + (inv.data.approximate_member_count || '?'))
+          : (dcErrText(inv) + ' — สร้างลิงก์ชวนใหม่แล้วตั้งค่า DISCORD_INVITE (ถ้าขึ้น Unknown Invite แปลว่าเซิร์ฟเวอร์ถูกลบไปแล้ว)'));
+      }
+    } else {
+      add(true, 'ลิงก์ชวนเข้าเซิร์ฟเวอร์', 'ไม่ได้ตั้ง DISCORD_INVITE');
+    }
+
+    // 9) คีย์ตรวจลายเซ็นปุ่มในดิส
+    add(!!D.publicKey && D.publicKey.length === 64, 'Public key (ปุ่มในดิส)', D.publicKey
+      ? ('ความยาว ' + D.publicKey.length + ' ตัวอักษร (ต้องได้ 64)')
+      : 'ยังไม่ได้ตั้ง DISCORD_PUBLIC_KEY — กดปุ่มในดิสแล้วจะไม่ตอบ');
+
+    return { code: 200, body: { checks, envFixed: ENV_FIXED, storeCounts: { access: accessCount, roleExp: roleExpCount } } };
   }
 
   if (pathname === '/panel/role') {
     const roleId = data.role === 'prime' ? D.primeRoleId : data.role === 'mc' ? D.mcRoleId : data.role === 'candy' ? D.candyRoleId : data.role === 'farmer' ? D.farmerRoleId : data.role === 'diamond' ? D.diamondRoleId : data.role === 'parkour' ? D.parkourRoleId : data.role === 'parkourv2' ? D.parkourv2RoleId : data.role === 'speedrun' ? D.speedrunRoleId : D.roleId;
     if (!roleId) return { code: 400, body: { error: 'ยังไม่ได้ตั้งไอดียศนี้' } };
-    const ok = await botSetRole(String(data.uid), roleId, !!data.on);
+    const roleRes = await botSetRoleDetail(String(data.uid), roleId, !!data.on);
+    const ok = roleRes.ok;
+    if (!ok) {
+      return {
+        code: 500,
+        body: { error: 'ให้ยศไม่สำเร็จ: ' + dcErrText(roleRes) + (roleRes.hint ? ' | ' + roleRes.hint : '') },
+      };
+    }
     // ถอดยศ = ล้างวันหมดอายุที่ตั้งไว้ด้วย (กันกวาดซ้ำ)
     if (ok && !data.on && STORE_ENABLED) await delRoleExpiry(String(data.uid), roleId);
     return { code: ok ? 200 : 500, body: ok ? { ok: true } : { error: 'บอทกดยศไม่สำเร็จ (เช็คสิทธิ์ Manage Roles + ลำดับยศ)' } };
@@ -2283,6 +2516,21 @@ function broadcast(msg) {
   }
   return n;
 }
+
+/* ---------- ตรวจสุขภาพดิสคอร์ดเป็นระยะ — ดูผลได้ใน log ของ Render ---------- */
+async function logDiscordHealth() {
+  if (!D.botToken) { console.log('[discord] ยังไม่ได้ตั้ง DISCORD_BOT_TOKEN'); return; }
+  const me = await dcFetch('/users/@me');
+  if (!me.ok) {
+    console.log('[discord] บอทล็อกอินไม่ได้: ' + dcErrText(me) + ' → ' + dcHint(me.status, me.code));
+    return;
+  }
+  const m = await dcFetch('/guilds/' + D.guildId + '/members?limit=1');
+  console.log('[discord] บอท ' + me.data.username + ' · เซิร์ฟเวอร์ ' + D.guildId + ' → '
+    + (m.ok ? 'ดึงรายชื่อสมาชิกได้' : dcErrText(m) + ' → ' + dcHint(m.status, m.code)));
+}
+setTimeout(() => logDiscordHealth().catch(() => {}), 8000).unref?.();
+setInterval(() => logDiscordHealth().catch(() => {}), 10 * 60 * 1000).unref?.();
 
 server.listen(PORT, () => {
   console.log(`Mooni Relay รันที่พอร์ต ${PORT}`);
