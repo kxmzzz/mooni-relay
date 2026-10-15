@@ -130,33 +130,54 @@ function accessActive(rec) {
 /* ---------- บอทจัดการยศ + ดึงรายชื่อสมาชิก ---------- */
 
 const dcApi = (path) => `https://discord.com/api/v10${path}`;
-const botHeaders = () => ({ Authorization: `Bot ${D.botToken}`, 'Content-Type': 'application/json' });
+const botHeaders = () => ({ Authorization: `Bot ${D.botToken}`, 'Content-Type': 'application/json', 'User-Agent': DC_UA });
 
 /**
  * เรียก Discord API แล้วคืนผลพร้อม "สาเหตุจริง"
  * เดิมโค้ดกลืน error เงียบ ๆ (คืน [] / false) ทำให้เวลาดิสเชื่อมไม่ได้
  * หน้าจัดการสมาชิกจะโชว์ว่าว่างเปล่าโดยไม่บอกว่าเกิดอะไรขึ้น
  */
-async function dcFetch(path, { token = D.botToken, method = 'GET', body } = {}) {
-  const out = { ok: false, status: 0, code: 0, error: '', data: null };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const DC_UA = 'DiscordBot (https://mooni-relay.onrender.com, 1.0)';
+
+async function dcFetch(path, { token = D.botToken, method = 'GET', body, tries = 3 } = {}) {
+  const out = { ok: false, status: 0, code: 0, error: '', html: false, data: null };
   if (!token) { out.error = 'no-token'; return out; }
-  try {
-    const r = await fetch(dcApi(path), {
-      method,
-      headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    let r;
+    try {
+      r = await fetch(dcApi(path), {
+        method,
+        // ใส่ User-Agent ให้ครบ — บางครั้งดิสคอร์ด/Cloudflare ตีกลับถ้าไม่มี
+        headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json', 'User-Agent': DC_UA },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch (e) {
+      out.status = 0;
+      out.error = 'network: ' + (e?.message || e);
+      if (attempt < tries) { await sleep(400 * attempt); continue; }
+      return out;
+    }
     out.status = r.status;
     out.ok = r.ok;
+    out.data = null;
+    out.raw = undefined;
     if (r.status !== 204) {
       const txt = await r.text();
-      try { out.data = JSON.parse(txt); } catch { out.data = null; out.raw = String(txt).slice(0, 300); }
+      try { out.data = JSON.parse(txt); } catch { out.data = null; out.raw = String(txt).slice(0, 300); out.html = /^\s*<(?:!doctype|html)/i.test(txt); }
     }
     if (!r.ok) {
       out.code = out.data?.code || 0;
       out.error = out.data?.message || out.raw || ('HTTP ' + out.status);
+      // โดนจำกัดหรือเซิร์ฟเวอร์ดิสคอร์ดสะดุด — ลองซ้ำตาม Retry-After ก่อนรายงาน
+      if ((r.status === 429 || r.status >= 500) && attempt < tries) {
+        const ra = Number(r.headers.get('retry-after') || 0) * 1000;
+        await sleep(ra > 0 ? Math.min(ra, 5000) : 500 * attempt);
+        continue;
+      }
     }
-  } catch (e) { out.error = 'network: ' + (e?.message || e); }
+    return out;
+  }
   return out;
 }
 
@@ -165,6 +186,7 @@ function dcErrText(api) {
   const st = api?.status || 0;
   const msg = String(api?.error || 'unknown');
   if (!st) return msg;
+  if (api?.html) return 'HTTP ' + st + ' — ดิสคอร์ด/Cloudflare ตอบกลับเป็นหน้า HTML (คำขอจาก IP ของเซิร์ฟเวอร์นี้ถูกบล็อก ไม่ใช่โทเคนผิด)';
   return msg.startsWith(String(st)) ? msg : 'HTTP ' + st + ' ' + msg;
 }
 
@@ -178,7 +200,7 @@ function dcHint(status, code) {
   if (status === 404 && code === 10004) return 'ไม่พบเซิร์ฟเวอร์ — ไอดี DISCORD_GUILD_ID ไม่ถูกต้อง หรือบอทไม่ได้อยู่ในเซิร์ฟเวอร์นั้น';
   if (status === 404 && code === 10003) return 'ไม่พบห้อง/หมวดหมู่นี้ — ไอดีห้องผิด หรือบอทไม่เห็นห้องนั้น';
   if (status === 404 && code === 10011) return 'ไม่พบยศนี้ — ไอดียศผิด หรือยศถูกลบไปแล้ว';
-  if (status === 429) return 'โดนจำกัดอัตราเรียก (rate limit) — รอสักครู่แล้วลองใหม่';
+  if (status === 429) return 'ดิสคอร์ดหน่วง/บล็อกคำขอจาก IP นี้ — ระบบลองซ้ำให้แล้ว ถ้าเป็นทุกครั้งให้ Redeploy/Restart เพื่อเปลี่ยน IP หรือย้ายโฮสต์ (Railway/VPS)';
   return 'ดูข้อความจากดิสคอร์ดด้านบน';
 }
 
@@ -278,7 +300,7 @@ async function botPostRoleButton({ channelId, text, imageUrl, imageData, imageNa
     fd.append('payload_json', JSON.stringify(payload));
     fd.append('files[0]', new Blob([fileBuf]), fname);
     r = await fetch(dcApi(`/channels/${channelId}/messages`), {
-      method: 'POST', headers: { Authorization: `Bot ${D.botToken}` }, body: fd,
+      method: 'POST', headers: { Authorization: `Bot ${D.botToken}`, 'User-Agent': DC_UA }, body: fd,
     });
   } else {
     r = await fetch(dcApi(`/channels/${channelId}/messages`), {
@@ -294,7 +316,7 @@ async function botPostRoleButton({ channelId, text, imageUrl, imageData, imageNa
 
 /* ---------- ระบบ Ticket (บอท ☁️Muffin) ---------- */
 
-const hdr = (token) => ({ Authorization: `Bot ${token}`, 'Content-Type': 'application/json' });
+const hdr = (token) => ({ Authorization: `Bot ${token}`, 'Content-Type': 'application/json', 'User-Agent': DC_UA });
 
 /**
  * ยศทีมงานเพิ่มเติมจาก env (คั่นด้วยจุลภาค) — ใช้ได้กับ "ปุ่มที่ส่งไปแล้ว" ด้วย
@@ -356,7 +378,7 @@ async function postTicketPanel({ channelId, text, imageData, imageName, imageUrl
     fd.append('payload_json', JSON.stringify(payload));
     fd.append('files[0]', new Blob([fileBuf]), fname);
     r = await fetch(dcApi(`/channels/${channelId}/messages`), {
-      method: 'POST', headers: { Authorization: `Bot ${token}` }, body: fd,
+      method: 'POST', headers: { Authorization: `Bot ${token}`, 'User-Agent': DC_UA }, body: fd,
     });
   } else {
     r = await fetch(dcApi(`/channels/${channelId}/messages`), {
@@ -928,7 +950,7 @@ async function checkDiscordMember(accessToken) {
 async function botCheckMember(uid) {
   try {
     const r = await fetch(`https://discord.com/api/guilds/${D.guildId}/members/${uid}`, {
-      headers: { Authorization: `Bot ${D.botToken}` },
+      headers: { Authorization: `Bot ${D.botToken}`, 'User-Agent': DC_UA },
     });
     if (r.status === 404) return { inGuild: false, mooni: false, prime: false };   // ออกจากเซิร์ฟเวอร์แล้ว
     if (!r.ok) return { error: true };
@@ -956,7 +978,7 @@ async function botCheckGuild2(uid) {
   if (!D.botToken || !D.guild2Id || !D.role2Id) return false;
   try {
     const r = await fetch(dcApi(`/guilds/${D.guild2Id}/members/${uid}`), {
-      headers: { Authorization: `Bot ${D.botToken}` },
+      headers: { Authorization: `Bot ${D.botToken}`, 'User-Agent': DC_UA },
     });
     if (!r.ok) return false;   // ไม่อยู่ดิสที่สอง / API มีปัญหา = ถือว่าไม่มีสิทธิ์พิเศษ
     const m = await r.json();
