@@ -1,1 +1,5 @@
 node_modules/
+
+# ของทดสอบในเครื่องของ Worker พร็อกซี่ดิสคอร์ด (ห้ามขึ้น git)
+.dev.vars
+.wrangler/

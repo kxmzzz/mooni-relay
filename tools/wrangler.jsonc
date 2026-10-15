@@ -1,0 +1,8 @@
+{
+  // ใช้ตอน deploy worker พร็อกซี่ดิสคอร์ดด้วยคำสั่ง:
+  //   cd relay/tools && npx wrangler deploy
+  // (หรือจะวางโค้ดในหน้า Workers & Pages ของ Cloudflare ตามหัวไฟล์ก็ได้)
+  "name": "mooni-discord",
+  "main": "discord-proxy-worker.js",
+  "compatibility_date": "2026-01-01"
+}

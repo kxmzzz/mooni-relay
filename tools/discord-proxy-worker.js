@@ -20,6 +20,16 @@
  *
  * หมายเหตุ: รหัส PROXY_KEY ต้องตรงกับท่อนท้าย URL ที่ตั้งใน DISCORD_API_BASE
  * ถ้ารหัสไม่ตรง Worker จะตอบ 404 (กันคนอื่นเอาไปใช้ฟรี)
+ *
+ * ── วิธี deploy ด้วยคำสั่ง (ไม่ต้องคลิกในหน้าเว็บ) ──
+ * ถ้าหน้าล็อกอินของ Cloudflare มีปัญหา หรือขี้เกียจทำตาม 7 ข้อข้างบน ใช้วิธีนี้แทนได้:
+ *
+ *     cd relay/tools
+ *     npx wrangler login                 # เปิดเบราว์เซอร์ กด Allow (ไม่ต้องพิมพ์รหัสผ่าน)
+ *     npx wrangler deploy                # ใช้ wrangler.jsonc ในโฟลเดอร์นี้ → ได้ URL *.workers.dev
+ *     npx wrangler secret put PROXY_KEY  # วางรหัสยาว ๆ ของคุณ แล้ว Enter
+ *
+ * ได้ URL กลับมาแบบ https://mooni-discord.<บัญชี>.workers.dev แล้วทำข้อ 6–7 ต่อ
  */
 
 export default {
