@@ -129,7 +129,9 @@ function accessActive(rec) {
 
 /* ---------- บอทจัดการยศ + ดึงรายชื่อสมาชิก ---------- */
 
-const dcApi = (path) => `https://discord.com/api/v10${path}`;
+// ฐานของ Discord API — ตั้ง DISCORD_API_BASE เป็นพร็อกซี่ได้ ถ้า IP ของเซิร์ฟเวอร์ถูกดิสคอร์ดบล็อก
+const DC_BASE = (envOf('DISCORD_API_BASE') || 'https://discord.com/api').replace(/\/$/, '');
+const dcApi = (path) => `${DC_BASE}/v10${path}`;
 const botHeaders = () => ({ Authorization: `Bot ${D.botToken}`, 'Content-Type': 'application/json', 'User-Agent': DC_UA });
 
 /**
@@ -145,7 +147,7 @@ const DC_UA_BROWSER = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537
 /** ยิงคำขอเดียวไปดิสคอร์ดเพื่อดูว่าผ่านไหม (ใช้ตอนตรวจสุขภาพ) */
 async function probeDiscord(ua) {
   try {
-    const r = await fetch('https://discord.com/api/v10/users/@me', {
+    const r = await fetch(`${DC_BASE}/v10/users/@me`, {
       headers: { Authorization: `Bot ${D.botToken}`, 'User-Agent': ua },
     });
     const txt = r.status === 204 ? '' : await r.text();
@@ -354,7 +356,7 @@ const VIEW_ONLY = '1024';
 /** แก้ข้อความตอบกลับที่ค้างไว้ (หลังตอบ deferred) — ใช้ interaction token ไม่ต้องใช้โทเคนบอท */
 async function editOriginal(appId, itoken, content) {
   try {
-    await fetch(`https://discord.com/api/v10/webhooks/${appId}/${itoken}/messages/@original`, {
+    await fetch(`${DC_BASE}/v10/webhooks/${appId}/${itoken}/messages/@original`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }),
     });
   } catch { /* ตอบไม่ได้ก็ปล่อย */ }
@@ -929,7 +931,7 @@ p{font-size:14px;color:#8ea6cc;line-height:1.6}</style></head><body><div class="
 /** เรียก Discord API ตรวจว่าคนที่ล็อกอินมียศ Mooni ในเซิร์ฟเวอร์ไหม */
 async function checkDiscordMember(accessToken) {
   // ดึง member ของ user เองในเซิร์ฟเวอร์ที่กำหนด — ได้ทั้ง roles และชื่อในครั้งเดียว
-  const r = await fetch(`https://discord.com/api/users/@me/guilds/${D.guildId}/member`, {
+  const r = await fetch(`${DC_BASE}/users/@me/guilds/${D.guildId}/member`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (r.status === 404) return { ok: false, reason: 'not_member' };   // ยังไม่ได้เข้าเซิร์ฟเวอร์
@@ -962,7 +964,7 @@ async function checkDiscordMember(accessToken) {
 /** ใช้บอทเช็คยศปัจจุบันของสมาชิก (เรียลไทม์ — ถอดยศแล้วรู้เลย) */
 async function botCheckMember(uid) {
   try {
-    const r = await fetch(`https://discord.com/api/guilds/${D.guildId}/members/${uid}`, {
+    const r = await fetch(`${DC_BASE}/guilds/${D.guildId}/members/${uid}`, {
       headers: { Authorization: `Bot ${D.botToken}`, 'User-Agent': DC_UA },
     });
     if (r.status === 404) return { inGuild: false, mooni: false, prime: false };   // ออกจากเซิร์ฟเวอร์แล้ว
@@ -1040,13 +1042,13 @@ async function handleAuth(req, res, url, cors) {
     if (pair.startsWith('shopadmin:')) {
       const html = (msg, ok) => resultPage(ok, ok ? 'เข้าหลังบ้านร้านสำเร็จ' : 'เข้าไม่ได้', msg);
       try {
-        const tr = await fetch('https://discord.com/api/oauth2/token', {
+        const tr = await fetch(`${DC_BASE}/oauth2/token`, {
           method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({ client_id: D.clientId, client_secret: D.clientSecret, grant_type: 'authorization_code', code, redirect_uri: REDIRECT_URI }),
         });
         if (!tr.ok) throw new Error('token');
         const tok = await tr.json();
-        const mem = await fetch(`https://discord.com/api/users/@me/guilds/${D.guildId}/member`, {
+        const mem = await fetch(`${DC_BASE}/users/@me/guilds/${D.guildId}/member`, {
           headers: { Authorization: `Bearer ${tok.access_token}` },
         }).then((r) => r.ok ? r.json() : null);
         const uid = mem?.user?.id;
@@ -1073,7 +1075,7 @@ async function handleAuth(req, res, url, cors) {
       return true;
     }
     try {
-      const tokRes = await fetch('https://discord.com/api/oauth2/token', {
+      const tokRes = await fetch(`${DC_BASE}/oauth2/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -1885,7 +1887,7 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   $('enter').addEventListener('click',async()=>{
     const typed=$('key').value.trim();if(typed)KEY=typed;   // อย่าล้างรหัสที่จำไว้ เมื่อกดเข้าซ้ำ/เข้าอัตโนมัติ
     localStorage.setItem('mooniKey',KEY);
-    try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();loadShop();loadMaps();setInterval(()=>{if(!cur)load();},15000);}
+    try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();loadShop();loadMaps();setInterval(()=>{if(!cur&&!document.hidden)load();},30000);   // ลดโหลดคำขอไปดิสคอร์ด (แท็บที่ซ่อนอยู่ไม่ต้องดึง)}
     catch(e){$('lmsg').textContent=e.message;}
   });
   /* ---- Maps config ---- */
@@ -2197,7 +2199,7 @@ async function handlePanel(pathname, data) {
       } else {
         let inv = { ok: false, status: 0, code: 0, error: '', data: null };
         try {
-          const r = await fetch('https://discord.com/api/v10/invites/' + code + '?with_counts=true');
+          const r = await fetch(`${DC_BASE}/v10/invites/` + code + '?with_counts=true');
           inv.status = r.status;
           inv.ok = r.ok;
           inv.data = await r.json().catch(() => null);
