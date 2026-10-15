@@ -2557,6 +2557,16 @@ function broadcast(msg) {
 
 /* ---------- ตรวจสุขภาพดิสคอร์ดเป็นระยะ — ดูผลได้ใน log ของ Render และใน /health ---------- */
 let discordHealth = { ok: null, status: 0, checkedAt: 0 };
+
+/** IP ขาออกของเซิร์ฟเวอร์ — ไว้ดูว่าเปลี่ยน IP แล้วหรือยัง เวลาโดนดิสคอร์ดบล็อก */
+async function egressIp() {
+  try {
+    const r = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(6000) });
+    const d = await r.json();
+    return String(d.ip || '').slice(0, 45);
+  } catch { return ''; }
+}
+
 async function logDiscordHealth() {
   if (!D.botToken) {
     console.log('[discord] ยังไม่ได้ตั้ง DISCORD_BOT_TOKEN');
@@ -2574,6 +2584,7 @@ async function logDiscordHealth() {
       ok: false, status: me.status, code: me.code, reason: String(me.error || '').slice(0, 120),
       alt, checkedAt: Date.now(),
     };
+    discordHealth.egressIp = await egressIp();
     return;
   }
   const m = await dcFetch('/guilds/' + D.guildId + '/members?limit=1');
@@ -2584,6 +2595,7 @@ async function logDiscordHealth() {
     reason: m.ok ? '' : String(m.error || '').slice(0, 120),
     membersOk: !!m.ok, checkedAt: Date.now(),
   };
+  discordHealth.egressIp = await egressIp();
 }
 setTimeout(() => logDiscordHealth().catch(() => {}), 8000).unref?.();
 setInterval(() => logDiscordHealth().catch(() => {}), 10 * 60 * 1000).unref?.();
