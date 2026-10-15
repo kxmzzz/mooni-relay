@@ -1664,7 +1664,7 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
 <div class="toast" id="toast"></div>
 <script>
   const $=id=>document.getElementById(id);
-  let KEY=localStorage.getItem('mooniKey')||'';
+  let KEY='';   // ไม่จำรหัสไว้ในเบราว์เซอร์ — ต้องใส่รหัสเองทุกครั้งที่เข้าหน้าแผง
   let members=[];
 
   async function call(path,body){
@@ -1935,8 +1935,9 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
     finally{b.disabled=false;}
   });
   $('enter').addEventListener('click',async()=>{
-    const typed=$('key').value.trim();if(typed)KEY=typed;   // อย่าล้างรหัสที่จำไว้ เมื่อกดเข้าซ้ำ/เข้าอัตโนมัติ
-    localStorage.setItem('mooniKey',KEY);
+    const typed=$('key').value.trim();
+    if(!typed){$('lmsg').textContent='ใส่รหัสแอดมินก่อน';return;}   // ต้องใส่รหัสเองทุกครั้ง ไม่ล็อกอินให้เองแล้ว
+    KEY=typed;
     try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();loadShop();loadMaps();setInterval(()=>{if(!cur&&!document.hidden)load();},30000);}   // ลดโหลดคำขอไปดิสคอร์ด (แท็บที่ซ่อนอยู่ไม่ต้องดึง)
     catch(e){$('lmsg').textContent=e.message;}
   });
@@ -1975,7 +1976,6 @@ const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
   $('mapDiscordGuild').addEventListener('change',async()=>{
     try{mapsData.buyDiscordGuild=$('mapDiscordGuild').value.trim();await call('/api/maps',{maps:mapsData.maps,buyDiscordGuild:mapsData.buyDiscordGuild,buyDiscordChannel:mapsData.buyDiscordChannel});}catch(e){}
   });
-  if(KEY){$('enter').click();}
 </script></body></html>`;
 
 /** อ่าน body ดิบเป็นข้อความ (ต้องใช้ตัวดิบตรวจลายเซ็น Discord) */
