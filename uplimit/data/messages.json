@@ -1,0 +1,33 @@
+{
+  "welcome": {
+    "title": "ยินดีต้อนรับสู่สังกัด Uplimit Media",
+    "description": "สวัสดี {user} 🎉\nสนใจเข้าสังกัดสามารถกด Ticket ได้เลยครับ\n\n",
+    "color": "#9900ff",
+    "image": "logo.jpg",
+    "useAvatar": false
+  },
+  "ticket": {
+    "title": "Ticket สำหรับติดต่อทีมงาน",
+    "description": "กดปุ่มด้านล่างเพื่อเปิดตั๋วและติดต่อทีมงาน",
+    "color": "#5865f2",
+    "image": "logo.jpg",
+    "buttons": [
+      {
+        "label": "สนใจเข้าสังกัด",
+        "emoji": "🎫",
+        "style": "primary",
+        "action": "create",
+        "url": "",
+        "ticketName": "สนใจเข้าสังกัด"
+      },
+      {
+        "label": "แจ้งปัญหา",
+        "emoji": "🚨",
+        "style": "primary",
+        "action": "create",
+        "url": "",
+        "ticketName": "แจ้งปัญหา"
+      }
+    ]
+  }
+}

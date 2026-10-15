@@ -11,6 +11,7 @@
 const http = require('http');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
+const uplimit = require('./uplimit');   // บอท Uplimit Media (ต้อนรับ + Ticket) — เดิมรันเป็นโปรเจกต์แยก
 
 const PORT = process.env.PORT || 4000;
 
@@ -2230,6 +2231,17 @@ async function handlePanel(pathname, data) {
     } else {
       add(true, 'บอท Muffin (ticket)', 'ไม่ได้ตั้ง MUFFIN_BOT_TOKEN — ใช้บอท Mooni ตัวเดิม' );
     }
+    // 8) บอท Uplimit Media (ต้อนรับ + Ticket ของเซิร์ฟเวอร์ Uplimit) — รันอยู่ในโปรเซสนี้
+    const ul = uplimit.status();
+    if (!ul.enabled) {
+      add(true, 'บอท Uplimit Media', 'ปิดอยู่ — ไม่ได้ตั้ง UPLIMIT_TOKEN / UPLIMIT_GUILD_ID');
+    } else if (ul.online) {
+      add(true, 'บอท Uplimit Media', 'ออนไลน์ ' + ul.tag + ' · ' + ul.guild);
+    } else {
+      add(false, 'บอท Uplimit Media', 'ต่อไม่ติด: ' + (ul.error || 'ยังไม่ล็อกอิน')
+        + ' — ตรวจ UPLIMIT_TOKEN กับ SERVER MEMBERS INTENT ของแอป Uplimit');
+    }
+
     const tkCh = String(data.ticketChannel || '').trim();
     const tkCat = String(data.ticketCategory || '').trim();
     if (/^\d{5,}$/.test(tkCh)) {
@@ -2387,6 +2399,7 @@ const server = http.createServer((req, res) => {
       muffinToken: !!M.botToken, muffinKey: !!M.publicKey, muffinKeyLen: M.publicKey.length,
       autoSlip: AUTO_SLIP, freeQr: FREE_QR_AVAILABLE, ocr: OCR_AVAILABLE,
       discord: discordHealth,   // สถานะล่าสุดที่ relay คุยกับดิสคอร์ดได้ (ไม่มีข้อมูลลับ)
+      uplimit: uplimit.status(),   // บอท Uplimit Media ที่รันอยู่ในโปรเซสนี้ (ไม่มีข้อมูลลับ)
       customApiBase: !!DC_CUSTOM_BASE,   // ยิงผ่านพร็อกซี่อยู่ไหม (ไม่โชว์ URL/รหัส)
     }));
   }
@@ -2657,4 +2670,7 @@ server.listen(PORT, () => {
   console.log(`บอทเช็คยศสด: ${D.botToken ? 'เปิด' : 'ปิด'} · คลังวันหมดอายุ (Upstash): ${STORE_ENABLED ? 'เปิด' : 'ปิด'}`);
   if (AUTH_ENABLED) console.log(`Redirect URI ที่ต้องใส่ใน Discord: ${REDIRECT_URI}`);
   console.log(`หน้าจัดการสมาชิก: ${PUBLIC_URL}/panel`);
+
+  // บอท Uplimit Media รันในโปรเซสเดียวกัน (ปิดตัวเองเงียบ ๆ ถ้าไม่ได้ตั้ง UPLIMIT_TOKEN)
+  uplimit.startUplimit().catch((err) => console.error('[uplimit] เริ่มไม่สำเร็จ:', err.message));
 });
