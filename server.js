@@ -33,6 +33,8 @@ function envOf(key, { token = false, digits = false } = {}) {
 }
 
 const ADMIN_KEY = envOf('ADMIN_KEY');
+const BLOXGATE_API_KEY = envOf('BLOXGATE_API_KEY', { token: true });
+const { accessForUser, isBloxgateRequest } = require('./bloxgate');
 
 /* ==================================================================
  * ล็อกอิน Discord + เช็คยศ "Mooni" (Discord role gate)
@@ -121,6 +123,16 @@ async function getAccessMap() {
 
 async function setAccess(uid, rec) { return upstash(['HSET', 'mooni:access', uid, JSON.stringify(rec)]); }
 async function delAccess(uid) { return upstash(['HDEL', 'mooni:access', uid]); }
+
+async function bloxgateRead(key, fallback) {
+  const result = await upstash(['GET', key]);
+  try { return result?.result ? JSON.parse(result.result) : fallback; } catch { return fallback; }
+}
+async function bloxgateWrite(key, value) {
+  return upstash(['SET', key, JSON.stringify(value)]);
+}
+const bloxgateMapKey = 'mooni:bloxgate:maps';
+const bloxgateGrantKey = (placeId) => `mooni:bloxgate:grants:${placeId}`;
 
 /** ยังไม่หมดอายุไหม (ไม่มี record / exp=0 = ถาวร) */
 function accessActive(rec) {
@@ -2381,8 +2393,33 @@ async function handlePanel(pathname, data) {
 }
 
 const server = http.createServer((req, res) => {
-  const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' };
+  const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, X-Admin-Key' };
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+
+  // ---- Bloxgate Roblox API: เกมลงทะเบียนตัวเอง แล้วตรวจสิทธิ์ด้วย key ที่เก็บใน Render ----
+  if (req.method === 'POST' && (url.pathname === '/api/roblox/register' || url.pathname === '/api/roblox/access')) {
+    readJson(req).then(async (data) => {
+      const headers = { 'Content-Type': 'application/json', ...cors };
+      if (!BLOXGATE_API_KEY) return { code: 503, body: { ok: false, error: 'BLOXGATE_API_KEY is not configured' } };
+      if (!isBloxgateRequest(req.headers, BLOXGATE_API_KEY)) return { code: 401, body: { ok: false, error: 'Unauthorized Roblox server' } };
+      if (!STORE_ENABLED) return { code: 503, body: { ok: false, error: 'Bloxgate storage is not configured' } };
+      const placeId = String(data.placeId || '').trim();
+      const gameName = String(data.gameName || '').trim().slice(0, 80);
+      if (!/^\d+$/.test(placeId) || Number(placeId) < 1 || !gameName) return { code: 400, body: { ok: false, error: 'Invalid game identity' } };
+      if (url.pathname === '/api/roblox/register') {
+        const maps = await bloxgateRead(bloxgateMapKey, {});
+        maps[placeId] = { placeId, name: gameName, updatedAt: Date.now() };
+        await bloxgateWrite(bloxgateMapKey, maps);
+        return { code: 200, body: { ok: true, map: maps[placeId] } };
+      }
+      const userId = String(data.userId || '').trim();
+      if (!/^\d+$/.test(userId) || Number(userId) < 1) return { code: 400, body: { ok: false, error: 'Invalid Roblox user ID' } };
+      const grants = await bloxgateRead(bloxgateGrantKey(placeId), {});
+      return { code: 200, body: { ok: true, ...accessForUser(grants, userId) } };
+    }).then((out) => { res.writeHead(out.code, { 'Content-Type': 'application/json', ...cors }); res.end(JSON.stringify(out.body)); })
+      .catch(() => { try { res.writeHead(500, cors); res.end(JSON.stringify({ ok: false, error: 'Bloxgate request failed' })); } catch {} });
+    return;
+  }
 
   if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/admin')) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
