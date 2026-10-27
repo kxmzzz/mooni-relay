@@ -12,4 +12,17 @@ function accessForUser(grants, userId, now = Date.now()) {
   return { allowed: true, permanent: false, daysRemaining: Math.max(1, Math.ceil((expires - now) / 86400000)), expiresAt };
 }
 
-module.exports = { accessForUser, isBloxgateRequest };
+function removeExpiredGrants(grants, now = Date.now()) {
+  let changed = false;
+  for (const [userId, grant] of Object.entries(grants || {})) {
+    if (grant?.isPermanent) continue;
+    const expires = Date.parse(String(grant?.expiresAt || ''));
+    if (!Number.isFinite(expires) || expires <= now) {
+      delete grants[userId];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+module.exports = { accessForUser, isBloxgateRequest, removeExpiredGrants };

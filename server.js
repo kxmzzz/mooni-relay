@@ -34,7 +34,7 @@ function envOf(key, { token = false, digits = false } = {}) {
 
 const ADMIN_KEY = envOf('ADMIN_KEY');
 const BLOXGATE_API_KEY = envOf('BLOXGATE_API_KEY', { token: true });
-const { accessForUser, isBloxgateRequest } = require('./bloxgate');
+const { accessForUser, isBloxgateRequest, removeExpiredGrants } = require('./bloxgate');
 
 /* ==================================================================
  * ล็อกอิน Discord + เช็คยศ "Mooni" (Discord role gate)
@@ -2448,6 +2448,7 @@ const server = http.createServer((req, res) => {
       const userId = String(data.userId || '').trim();
       if (!/^\d+$/.test(userId) || Number(userId) < 1) return { code: 400, body: { ok: false, error: 'Invalid Roblox user ID' } };
       const grants = await bloxgateRead(bloxgateGrantKey(placeId), {});
+      if (removeExpiredGrants(grants)) await bloxgateWrite(bloxgateGrantKey(placeId), grants);
       return { code: 200, body: { ok: true, ...accessForUser(grants, userId) } };
     }).then((out) => { res.writeHead(out.code, { 'Content-Type': 'application/json', ...cors }); res.end(JSON.stringify(out.body)); })
       .catch(() => { try { res.writeHead(500, cors); res.end(JSON.stringify({ ok: false, error: 'Bloxgate request failed' })); } catch {} });
@@ -2471,7 +2472,7 @@ const server = http.createServer((req, res) => {
       if (!/^\d+$/.test(placeId)) return { code: 400, body: { error: 'Invalid Place ID' } };
       const grants = await bloxgateRead(bloxgateGrantKey(placeId), {});
       if (req.method === 'GET') {
-        let changed = false;
+        let changed = removeExpiredGrants(grants);
         const rows = await Promise.all(Object.entries(grants).map(async ([userId, grant]) => {
           if (grant.avatarUrl) return grant;
           const avatarUrl = await bloxgateAvatarUrl(grant.robloxUserId || grant.id || userId);
