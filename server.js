@@ -2392,6 +2392,16 @@ async function handlePanel(pathname, data) {
   return { code: 404, body: { error: 'not found' } };
 }
 
+async function bloxgateAvatarUrl(userId) {
+  try {
+    const response = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${encodeURIComponent(userId)}&size=150x150&format=Png&isCircular=false`);
+    const avatar = (await response.json())?.data?.[0]?.imageUrl;
+    return typeof avatar === 'string' ? avatar : null;
+  } catch {
+    return null;
+  }
+}
+
 const server = http.createServer((req, res) => {
   const cors = {
     'Access-Control-Allow-Origin': '*',
@@ -2441,7 +2451,17 @@ const server = http.createServer((req, res) => {
       const placeId = String(url.searchParams.get('placeId') || data.placeId || '').trim();
       if (!/^\d+$/.test(placeId)) return { code: 400, body: { error: 'Invalid Place ID' } };
       const grants = await bloxgateRead(bloxgateGrantKey(placeId), {});
-      if (req.method === 'GET') return { code: 200, body: { grants: Object.values(grants) } };
+      if (req.method === 'GET') {
+        let changed = false;
+        const rows = await Promise.all(Object.entries(grants).map(async ([userId, grant]) => {
+          if (grant.avatarUrl) return grant;
+          const avatarUrl = await bloxgateAvatarUrl(grant.robloxUserId || grant.id || userId);
+          if (avatarUrl) { grant.avatarUrl = avatarUrl; changed = true; }
+          return grant;
+        }));
+        if (changed) await bloxgateWrite(bloxgateGrantKey(placeId), grants);
+        return { code: 200, body: { grants: rows } };
+      }
       if (req.method === 'DELETE') {
         const userId = String(url.searchParams.get('userId') || data.userId || '').trim();
         delete grants[userId]; await bloxgateWrite(bloxgateGrantKey(placeId), grants);
@@ -2455,7 +2475,8 @@ const server = http.createServer((req, res) => {
       const isPermanent = data.isPermanent === true;
       const expiresAt = isPermanent ? null : new Date(data.expiresAt).toISOString();
       if (!isPermanent && Number.isNaN(Date.parse(expiresAt))) return { code: 400, body: { error: 'Expiry must be valid' } };
-      const grant = { id: Number(user.id), robloxUserId: Number(user.id), username: user.name, displayName: user.displayName, avatarUrl: null, presenceType: 0, isPermanent, expiresAt };
+      const avatarUrl = await bloxgateAvatarUrl(user.id);
+      const grant = { id: Number(user.id), robloxUserId: Number(user.id), username: user.name, displayName: user.displayName, avatarUrl, presenceType: 0, isPermanent, expiresAt };
       grants[String(user.id)] = grant; await bloxgateWrite(bloxgateGrantKey(placeId), grants);
       return { code: 201, body: { grant } };
     }).then((out) => { res.writeHead(out.code, { 'Content-Type': 'application/json', ...cors }); res.end(JSON.stringify(out.body)); })
