@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { accessForUser, isBloxgateRequest } = require('../bloxgate');
+const { readFileSync } = require('node:fs');
 
 test('accepts only the configured Bloxgate API key', () => {
   assert.equal(isBloxgateRequest({ 'x-api-key': 'correct' }, 'correct'), true);
@@ -20,4 +21,11 @@ test('rejects expired grants and accepts permanent grants', () => {
   assert.deepEqual(accessForUser({ forever: { isPermanent: true } }, 'forever', now), {
     allowed: true, permanent: true, daysRemaining: null, expiresAt: null,
   });
+});
+
+test('relay exposes map discovery and protected grant management endpoints', () => {
+  const source = readFileSync(require.resolve('../server'), 'utf8');
+  assert.match(source, /\/api\/roblox\/maps/);
+  assert.match(source, /\/api\/roblox\/grants/);
+  assert.match(source, /Roblox username was not found/);
 });

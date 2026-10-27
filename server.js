@@ -2421,6 +2421,44 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/roblox/maps') {
+    return bloxgateRead(bloxgateMapKey, {}).then((maps) => {
+      const list = Object.values(maps).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      res.writeHead(200, { 'Content-Type': 'application/json', ...cors }); res.end(JSON.stringify({ ok: true, maps: list }));
+    }).catch(() => { res.writeHead(500, cors); res.end('{"ok":false}'); });
+  }
+
+  if (url.pathname === '/api/roblox/grants' && ['GET', 'POST', 'DELETE'].includes(req.method)) {
+    readJson(req).then(async (data) => {
+      const headers = { 'Content-Type': 'application/json', ...cors };
+      if (!BLOXGATE_API_KEY) return { code: 503, body: { error: 'BLOXGATE_API_KEY is not configured' } };
+      if (!isBloxgateRequest(req.headers, BLOXGATE_API_KEY)) return { code: 401, body: { error: 'Unauthorized Bloxgate admin' } };
+      if (!STORE_ENABLED) return { code: 503, body: { error: 'Bloxgate storage is not configured' } };
+      const placeId = String(url.searchParams.get('placeId') || data.placeId || '').trim();
+      if (!/^\d+$/.test(placeId)) return { code: 400, body: { error: 'Invalid Place ID' } };
+      const grants = await bloxgateRead(bloxgateGrantKey(placeId), {});
+      if (req.method === 'GET') return { code: 200, body: { grants: Object.values(grants) } };
+      if (req.method === 'DELETE') {
+        const userId = String(url.searchParams.get('userId') || data.userId || '').trim();
+        delete grants[userId]; await bloxgateWrite(bloxgateGrantKey(placeId), grants);
+        return { code: 200, body: { deleted: true } };
+      }
+      const username = String(data.username || '').trim();
+      if (!username) return { code: 400, body: { error: 'Roblox username is required' } };
+      const lookup = await fetch('https://users.roblox.com/v1/usernames/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usernames: [username], excludeBannedUsers: false }) });
+      const user = (await lookup.json())?.data?.[0];
+      if (!user) return { code: 400, body: { error: 'Roblox username was not found' } };
+      const isPermanent = data.isPermanent === true;
+      const expiresAt = isPermanent ? null : new Date(data.expiresAt).toISOString();
+      if (!isPermanent && Number.isNaN(Date.parse(expiresAt))) return { code: 400, body: { error: 'Expiry must be valid' } };
+      const grant = { id: Number(user.id), robloxUserId: Number(user.id), username: user.name, displayName: user.displayName, avatarUrl: null, presenceType: 0, isPermanent, expiresAt };
+      grants[String(user.id)] = grant; await bloxgateWrite(bloxgateGrantKey(placeId), grants);
+      return { code: 201, body: { grant } };
+    }).then((out) => { res.writeHead(out.code, { 'Content-Type': 'application/json', ...cors }); res.end(JSON.stringify(out.body)); })
+      .catch(() => { try { res.writeHead(500, cors); res.end(JSON.stringify({ error: 'Bloxgate request failed' })); } catch {} });
+    return;
+  }
+
   if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/admin')) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(ADMIN_HTML);
