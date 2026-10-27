@@ -42,6 +42,7 @@ test('relay exposes map discovery and protected grant management endpoints', () 
   assert.match(source, /thumbnails\.roblox\.com\/v1\/users\/avatar-headshot/);
   assert.match(source, /games\.roblox\.com\/v1\/games/);
   assert.match(source, /thumbnails\.roblox\.com\/v1\/games\/icons/);
-  assert.match(source, /Mooni Bloxgate Admin/);
   assert.match(source, /bloxgate-admin\.html/);
+  assert.match(source, /\/api\/bloxgate\/login/);
+  assert.match(source, /BLOXGATE_ADMIN_PASSWORD/);
 });

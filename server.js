@@ -35,10 +35,15 @@ function envOf(key, { token = false, digits = false } = {}) {
 
 const ADMIN_KEY = envOf('ADMIN_KEY');
 const BLOXGATE_API_KEY = envOf('BLOXGATE_API_KEY', { token: true });
+const BLOXGATE_ADMIN_USERNAME = envOf('BLOXGATE_ADMIN_USERNAME') || 'Mooni';
+const BLOXGATE_ADMIN_PASSWORD = envOf('BLOXGATE_ADMIN_PASSWORD', { token: true });
 const { accessForUser, isBloxgateRequest, removeExpiredGrants } = require('./bloxgate');
 const BLOXGATE_ADMIN_HTML = fs.readFileSync(__dirname + '/bloxgate-admin.html', 'utf8');
 
 function hasBloxgateAdminAccess(headers) {
+  const session = crypto.createHmac('sha256', AUTH_SECRET).update(`bloxgate:${BLOXGATE_ADMIN_USERNAME}`).digest('hex');
+  const cookie = String(headers?.cookie || '').match(/(?:^|;\s*)bloxgate_admin=([^;]+)/)?.[1];
+  if (cookie && cookie === session) return true;
   const encoded = String(headers?.authorization || '').replace(/^Basic\s+/i, '');
   if (!encoded || !ADMIN_KEY) return false;
   try {
@@ -2438,6 +2443,16 @@ const server = http.createServer((req, res) => {
   };
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
+  if (req.method === 'POST' && url.pathname === '/api/bloxgate/login') {
+    return readJson(req).then((data) => {
+      if (!BLOXGATE_ADMIN_PASSWORD) return { code: 503, body: { error: 'BLOXGATE_ADMIN_PASSWORD is not configured' } };
+      if (String(data.username || '') !== BLOXGATE_ADMIN_USERNAME || String(data.password || '') !== BLOXGATE_ADMIN_PASSWORD) return { code: 401, body: { error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' } };
+      const session = crypto.createHmac('sha256', AUTH_SECRET).update(`bloxgate:${BLOXGATE_ADMIN_USERNAME}`).digest('hex');
+      return { code: 200, body: { ok: true }, cookie: `bloxgate_admin=${session}; Path=/; Max-Age=2592000; HttpOnly; Secure; SameSite=Strict` };
+    }).then((out) => { res.writeHead(out.code, { 'Content-Type': 'application/json', ...(out.cookie ? { 'Set-Cookie': out.cookie } : {}) }); res.end(JSON.stringify(out.body)); })
+      .catch(() => { res.writeHead(400); res.end('{"error":"Invalid login request"}'); });
+  }
+
   // ---- Bloxgate Roblox API: เกมลงทะเบียนตัวเอง แล้วตรวจสิทธิ์ด้วย key ที่เก็บใน Render ----
   if (req.method === 'POST' && (url.pathname === '/api/roblox/register' || url.pathname === '/api/roblox/access')) {
     readJson(req).then(async (data) => {
@@ -2516,10 +2531,6 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/') {
-    if (!hasBloxgateAdminAccess(req.headers)) {
-      res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Mooni Bloxgate Admin", charset="UTF-8"' });
-      return res.end('Admin login required');
-    }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(BLOXGATE_ADMIN_HTML);
   }
