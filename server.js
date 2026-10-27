@@ -2393,7 +2393,11 @@ async function handlePanel(pathname, data) {
 }
 
 const server = http.createServer((req, res) => {
-  const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, X-Admin-Key' };
+  const cors = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, X-Admin-Key',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  };
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
   // ---- Bloxgate Roblox API: เกมลงทะเบียนตัวเอง แล้วตรวจสิทธิ์ด้วย key ที่เก็บใน Render ----

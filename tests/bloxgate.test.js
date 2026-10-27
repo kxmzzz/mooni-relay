@@ -28,4 +28,5 @@ test('relay exposes map discovery and protected grant management endpoints', () 
   assert.match(source, /\/api\/roblox\/maps/);
   assert.match(source, /\/api\/roblox\/grants/);
   assert.match(source, /Roblox username was not found/);
+  assert.match(source, /Access-Control-Allow-Methods/);
 });
