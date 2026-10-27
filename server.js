@@ -10,6 +10,7 @@
  */
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
 const { WebSocketServer } = require('ws');
 const uplimit = require('./uplimit');   // บอท Uplimit Media (ต้อนรับ + Ticket) — เดิมรันเป็นโปรเจกต์แยก
 
@@ -35,6 +36,16 @@ function envOf(key, { token = false, digits = false } = {}) {
 const ADMIN_KEY = envOf('ADMIN_KEY');
 const BLOXGATE_API_KEY = envOf('BLOXGATE_API_KEY', { token: true });
 const { accessForUser, isBloxgateRequest, removeExpiredGrants } = require('./bloxgate');
+const BLOXGATE_ADMIN_HTML = fs.readFileSync(__dirname + '/bloxgate-admin.html', 'utf8');
+
+function hasBloxgateAdminAccess(headers) {
+  const encoded = String(headers?.authorization || '').replace(/^Basic\s+/i, '');
+  if (!encoded || !ADMIN_KEY) return false;
+  try {
+    const [, password] = Buffer.from(encoded, 'base64').toString('utf8').split(':');
+    return password === ADMIN_KEY;
+  } catch { return false; }
+}
 
 /* ==================================================================
  * ล็อกอิน Discord + เช็คยศ "Mooni" (Discord role gate)
@@ -2466,7 +2477,7 @@ const server = http.createServer((req, res) => {
     readJson(req).then(async (data) => {
       const headers = { 'Content-Type': 'application/json', ...cors };
       if (!BLOXGATE_API_KEY) return { code: 503, body: { error: 'BLOXGATE_API_KEY is not configured' } };
-      if (!isBloxgateRequest(req.headers, BLOXGATE_API_KEY)) return { code: 401, body: { error: 'Unauthorized Bloxgate admin' } };
+      if (!isBloxgateRequest(req.headers, BLOXGATE_API_KEY) && !hasBloxgateAdminAccess(req.headers)) return { code: 401, body: { error: 'Unauthorized Bloxgate admin' } };
       if (!STORE_ENABLED) return { code: 503, body: { error: 'Bloxgate storage is not configured' } };
       const placeId = String(url.searchParams.get('placeId') || data.placeId || '').trim();
       if (!/^\d+$/.test(placeId)) return { code: 400, body: { error: 'Invalid Place ID' } };
@@ -2504,7 +2515,16 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/admin')) {
+  if (req.method === 'GET' && url.pathname === '/') {
+    if (!hasBloxgateAdminAccess(req.headers)) {
+      res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Mooni Bloxgate Admin", charset="UTF-8"' });
+      return res.end('Admin login required');
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(BLOXGATE_ADMIN_HTML);
+  }
+
+  if (req.method === 'GET' && url.pathname === '/admin') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(ADMIN_HTML);
   }
