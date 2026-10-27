@@ -2402,6 +2402,23 @@ async function bloxgateAvatarUrl(userId) {
   }
 }
 
+async function bloxgateGameProfile(universeId, fallbackName) {
+  const profile = { name: fallbackName, iconUrl: null };
+  if (!/^\d+$/.test(String(universeId)) || Number(universeId) < 1) return profile;
+  const encodedId = encodeURIComponent(universeId);
+  const [gameResult, iconResult] = await Promise.allSettled([
+    fetch(`https://games.roblox.com/v1/games?universeIds=${encodedId}`),
+    fetch(`https://thumbnails.roblox.com/v1/games/icons?universeIds=${encodedId}&size=512x512&format=Png&isCircular=false`),
+  ]);
+  if (gameResult.status === 'fulfilled') {
+    try { profile.name = (await gameResult.value.json())?.data?.[0]?.name || profile.name; } catch {}
+  }
+  if (iconResult.status === 'fulfilled') {
+    try { profile.iconUrl = (await iconResult.value.json())?.data?.[0]?.imageUrl || null; } catch {}
+  }
+  return profile;
+}
+
 const server = http.createServer((req, res) => {
   const cors = {
     'Access-Control-Allow-Origin': '*',
@@ -2421,8 +2438,10 @@ const server = http.createServer((req, res) => {
       const gameName = String(data.gameName || '').trim().slice(0, 80);
       if (!/^\d+$/.test(placeId) || Number(placeId) < 1 || !gameName) return { code: 400, body: { ok: false, error: 'Invalid game identity' } };
       if (url.pathname === '/api/roblox/register') {
+        const universeId = String(data.universeId || '').trim();
+        const profile = await bloxgateGameProfile(universeId, gameName);
         const maps = await bloxgateRead(bloxgateMapKey, {});
-        maps[placeId] = { placeId, name: gameName, updatedAt: Date.now() };
+        maps[placeId] = { placeId, universeId: /^\d+$/.test(universeId) ? universeId : null, name: profile.name, iconUrl: profile.iconUrl, updatedAt: Date.now() };
         await bloxgateWrite(bloxgateMapKey, maps);
         return { code: 200, body: { ok: true, map: maps[placeId] } };
       }
