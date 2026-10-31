@@ -27,4 +27,14 @@ async function createTicketFlow({
   return { created: true, channelId: channel.id };
 }
 
-module.exports = { createTicketFlow };
+/** Keep the interaction message truthful when Discord refuses a deletion. */
+async function closeTicketFlow({ deleteChannel, announceFailure }) {
+  try {
+    return await deleteChannel();
+  } catch (err) {
+    await announceFailure(`ปิดห้อง Ticket ไม่สำเร็จ (${err.message || 'ไม่ทราบสาเหตุ'})`);
+    throw err;
+  }
+}
+
+module.exports = { createTicketFlow, closeTicketFlow };

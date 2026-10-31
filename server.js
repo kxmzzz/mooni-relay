@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const { WebSocketServer } = require('ws');
 const uplimit = require('./uplimit');   // บอท Uplimit Media (ต้อนรับ + Ticket) — เดิมรันเป็นโปรเจกต์แยก
-const { createTicketFlow } = require('./uplimit/ticket-flow');
+const { createTicketFlow, closeTicketFlow } = require('./uplimit/ticket-flow');
 
 const PORT = process.env.PORT || 4000;
 
@@ -416,6 +416,8 @@ function isTicketStaff(memberRoles, fromButton) {
 
 // สิทธิ์: VIEW_CHANNEL(1024) + SEND_MESSAGES(2048) + READ_MESSAGE_HISTORY(65536) + ATTACH_FILES(32768)
 const TICKET_ALLOW = String(1024 + 2048 + 65536 + 32768);
+// บอท Muffin ต้องมี Manage Channels (16) ในห้องเอง เพื่อปิด Ticket ได้แม้หมวดหมู่ตั้งสิทธิ์เข้มงวด
+const TICKET_BOT_ALLOW = String(1024 + 2048 + 65536 + 32768 + 16);
 const VIEW_ONLY = '1024';
 
 /** แก้ข้อความตอบกลับที่ค้างไว้ (หลังตอบ deferred) — ใช้ interaction token ไม่ต้องใช้โทเคนบอท */
@@ -510,6 +512,7 @@ async function createTicket(body, staffRoleIds, categoryId) {
           permission_overwrites: [
             { id: guildId, type: 0, deny: VIEW_ONLY },
             { id: uid, type: 1, allow: TICKET_ALLOW },
+            { id: body.application_id, type: 1, allow: TICKET_BOT_ALLOW },
             ...staffIds.map((rid) => ({ id: rid, type: 0, allow: TICKET_ALLOW })),
           ],
         }),
@@ -2092,7 +2095,17 @@ async function handleInteraction(req, res, pubKey) {
       // 🔒 ปิดห้อง — ตอบก่อนแล้วค่อยลบ
       json({ type: 4, data: { content: '🔒 กำลังปิดห้องนี้ใน 3 วินาที…' } });
       setTimeout(() => {
-        fetch(dcApi(`/channels/${chId}`), { method: 'DELETE', headers: hdr(token) }).catch(() => {});
+        closeTicketFlow({
+          deleteChannel: async () => {
+            const deleted = await fetch(dcApi(`/channels/${chId}`), {
+              method: 'DELETE', headers: hdr(token), signal: AbortSignal.timeout(8000),
+            });
+            if (deleted.ok) return;
+            const detail = await deleted.json().catch(() => ({}));
+            throw new Error(`Discord ${deleted.status}: ${detail?.message || 'ลบห้องไม่สำเร็จ'}`);
+          },
+          announceFailure: (content) => editOriginal(body.application_id, body.token, content),
+        }).catch((err) => console.error('[ticket] ปิดห้องไม่สำเร็จ:', err.message));
       }, 3000);
       return;
     }
