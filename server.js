@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const { WebSocketServer } = require('ws');
 const uplimit = require('./uplimit');   // บอท Uplimit Media (ต้อนรับ + Ticket) — เดิมรันเป็นโปรเจกต์แยก
+const { createTicketFlow } = require('./uplimit/ticket-flow');
 
 const PORT = process.env.PORT || 4000;
 
@@ -481,55 +482,68 @@ async function createTicket(body, staffRoleIds, categoryId) {
 
   const uname = String(user.username || 'user').toLowerCase().replace(/[^a-z0-9\-]/g, '').slice(0, 20) || 'user';
 
-  // กันเปิดซ้ำ — หาห้องเดิมในหมวดนี้ที่ topic มีไอดีเขา
-  try {
-    const chs = await fetch(dcApi(`/guilds/${guildId}/channels`), { headers: hdr(token) }).then((r) => r.json());
-    const dup = Array.isArray(chs) && chs.find((c) => c.parent_id === categoryId && String(c.topic || '').includes(`ticket:${uid}`));
-    if (dup) return editOriginal(appId, itoken, `คุณมีห้องที่เปิดอยู่แล้ว → <#${dup.id}>`);
-  } catch { /* หาไม่ได้ก็สร้างใหม่ไปเลย */ }
-
-  const res = await fetch(dcApi(`/guilds/${guildId}/channels`), {
-    method: 'POST', headers: hdr(token),
-    body: JSON.stringify({
-      name: `ticket-${uname}`,
-      type: 0,
-      parent_id: categoryId,
-      topic: `ticket:${uid}`,
-      permission_overwrites: [
-        { id: guildId, type: 0, deny: VIEW_ONLY },                                  // ทุกคนมองไม่เห็น
-        { id: uid, type: 1, allow: TICKET_ALLOW },                                  // คนเปิด
-        ...staffIds.map((rid) => ({ id: rid, type: 0, allow: TICKET_ALLOW })),      // ทีมงานทุกยศ
-      ],
+  return createTicketFlow({
+    // กันเปิดซ้ำ — หาห้องเดิมในหมวดนี้ที่ topic มีไอดีเขา
+    findExisting: async () => {
+      try {
+        const chs = await fetch(dcApi(`/guilds/${guildId}/channels`), {
+          headers: hdr(token), signal: AbortSignal.timeout(8000),
+        }).then((r) => r.json());
+        return Array.isArray(chs) && chs.find(
+          (c) => c.parent_id === categoryId && String(c.topic || '').includes(`ticket:${uid}`),
+        );
+      } catch (err) {
+        // Keep the previous behaviour (a temporary lookup error must not stop a buyer),
+        // but record it for Render diagnostics instead of hiding it.
+        console.warn('[ticket] ตรวจ Ticket เดิมไม่ได้:', err.message);
+        return null;
+      }
+    },
+    createChannel: async () => {
+      const res = await fetch(dcApi(`/guilds/${guildId}/channels`), {
+        method: 'POST', headers: hdr(token), signal: AbortSignal.timeout(8000),
+        body: JSON.stringify({
+          name: `ticket-${uname}`,
+          type: 0,
+          parent_id: categoryId,
+          topic: `ticket:${uid}`,
+          permission_overwrites: [
+            { id: guildId, type: 0, deny: VIEW_ONLY },
+            { id: uid, type: 1, allow: TICKET_ALLOW },
+            ...staffIds.map((rid) => ({ id: rid, type: 0, allow: TICKET_ALLOW })),
+          ],
+        }),
+      });
+      const channel = await res.json().catch(() => ({}));
+      if (!channel?.id) {
+        throw new Error(`Discord ${res.status}: ${channel?.message || 'สร้างห้องไม่สำเร็จ'}`);
+      }
+      return channel;
+    },
+    announceExisting: (id) => editOriginal(appId, itoken, `คุณมีห้องที่เปิดอยู่แล้ว → <#${id}>`),
+    announceOpened: (id) => editOriginal(appId, itoken, `เปิดห้องให้แล้ว → <#${id}>`),
+    // ไม่ให้การส่งข้อความต้อนรับมาบล็อกการตอบลิงก์ห้อง Ticket
+    sendWelcome: (channelId) => fetch(dcApi(`/channels/${channelId}/messages`), {
+      method: 'POST', headers: hdr(token), signal: AbortSignal.timeout(8000),
+      body: JSON.stringify({
+        content: `<@${uid}> ${staffIds.map((r) => `<@&${r}>`).join(' ')}`,
+        embeds: [{
+          color: 0x8ec9ff,
+          description: '📩 เปิด Ticket เรียบร้อย — พิมพ์เรื่องที่ต้องการได้เลย รอทีมงานสักครู่นะ\n\n*ปุ่มด้านล่างใช้ได้เฉพาะทีมงานเท่านั้น*',
+        }],
+        components: [{
+          type: 1,
+          components: [
+            { type: 2, style: 3, label: '✅ สำเร็จ', custom_id: `tk:d:${staffIds.slice(0, 3).join(',')}` },
+            { type: 2, style: 4, label: '🔒 ปิดห้อง', custom_id: `tk:c:${staffIds.slice(0, 3).join(',')}` },
+          ],
+        }],
+      }),
+    }).then((res) => {
+      if (!res.ok) throw new Error(`Discord ${res.status}`);
     }),
+    onWelcomeError: (err) => console.error('[ticket] ส่งข้อความต้อนรับไม่สำเร็จ:', err.message),
   });
-
-  const ch = await res.json().catch(() => ({}));
-  if (!ch?.id) {
-    return editOriginal(appId, itoken,
-      `เปิดห้องไม่สำเร็จ (${res.status}) ${ch?.message || ''} — เช็คสิทธิ์บอท Manage Channels/Manage Roles และไอดีหมวดหมู่`);
-  }
-
-  // ข้อความต้อนรับ + ปุ่มสำหรับทีมงาน
-  await fetch(dcApi(`/channels/${ch.id}/messages`), {
-    method: 'POST', headers: hdr(token),
-    body: JSON.stringify({
-      content: `<@${uid}> ${staffIds.map((r) => `<@&${r}>`).join(' ')}`,
-      embeds: [{
-        color: 0x8ec9ff,
-        description: '📩 เปิด Ticket เรียบร้อย — พิมพ์เรื่องที่ต้องการได้เลย รอทีมงานสักครู่นะ\n\n*ปุ่มด้านล่างใช้ได้เฉพาะทีมงานเท่านั้น*',
-      }],
-      components: [{
-        type: 1,
-        components: [
-          // custom_id ยาวได้ไม่เกิน 100 ตัว — ใส่แค่ 3 ยศแรก ที่เหลือ env ครอบคลุมอยู่แล้ว
-          { type: 2, style: 3, label: '✅ สำเร็จ', custom_id: `tk:d:${staffIds.slice(0, 3).join(',')}` },
-          { type: 2, style: 4, label: '🔒 ปิดห้อง', custom_id: `tk:c:${staffIds.slice(0, 3).join(',')}` },
-        ],
-      }],
-    }),
-  }).catch(() => {});
-
-  return editOriginal(appId, itoken, `เปิดห้องให้แล้ว → <#${ch.id}>`);
 }
 
 /* ---------- ร้านค้า (Shop) ---------- */
@@ -2044,7 +2058,14 @@ async function handleInteraction(req, res, pubKey) {
     if (customId.startsWith('tk:o:')) {                     // เปิด ticket
       const [, , staffRoleId, categoryId] = customId.split(':');
       json({ type: 5, data: { flags: 64 } });               // ตอบ deferred ก่อน กันเกิน 3 วิ
-      createTicket(body, staffRoleId, categoryId).catch(() => {});
+      createTicket(body, staffRoleId, categoryId).catch((err) => {
+        console.error('[ticket] เปิดห้องไม่สำเร็จ:', err.message);
+        return editOriginal(
+          body.application_id,
+          body.token,
+          'เปิดห้อง Ticket ไม่สำเร็จชั่วคราว กรุณาลองใหม่อีกครั้ง หรือติดต่อทีมงาน',
+        );
+      });
       return;
     }
 
