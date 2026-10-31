@@ -14,6 +14,7 @@ const fs = require('fs');
 const { WebSocketServer } = require('ws');
 const uplimit = require('./uplimit');   // บอท Uplimit Media (ต้อนรับ + Ticket) — เดิมรันเป็นโปรเจกต์แยก
 const { createTicketFlow, closeTicketFlow } = require('./uplimit/ticket-flow');
+const { requestTicketDiscord } = require('./uplimit/ticket-request');
 
 const PORT = process.env.PORT || 4000;
 
@@ -163,6 +164,10 @@ function accessActive(rec) {
 const DC_CUSTOM_BASE = envOf('DISCORD_API_BASE');
 const DC_BASE = (DC_CUSTOM_BASE || 'https://discord.com/api').replace(/\/$/, '');
 const dcApi = (path) => `${DC_BASE}/v10${path}`;
+const ticketRequest = (path, options) => requestTicketDiscord(path, options, {
+  customBase: DC_CUSTOM_BASE,
+  directBase: 'https://discord.com/api',
+});
 const botHeaders = () => ({ Authorization: `Bot ${D.botToken}`, 'Content-Type': 'application/json', 'User-Agent': DC_UA });
 
 /**
@@ -423,10 +428,11 @@ const VIEW_ONLY = '1024';
 /** แก้ข้อความตอบกลับที่ค้างไว้ (หลังตอบ deferred) — ใช้ interaction token ไม่ต้องใช้โทเคนบอท */
 async function editOriginal(appId, itoken, content) {
   try {
-    await fetch(`${DC_BASE}/v10/webhooks/${appId}/${itoken}/messages/@original`, {
+    const response = await ticketRequest(`/webhooks/${appId}/${itoken}/messages/@original`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }),
     });
-  } catch { /* ตอบไม่ได้ก็ปล่อย */ }
+    if (!response.ok) console.error('[ticket] อัปเดตข้อความไม่สำเร็จ: Discord ' + response.status);
+  } catch (err) { console.error('[ticket] อัปเดตข้อความไม่สำเร็จ:', err.message); }
 }
 
 /** โพสต์ข้อความ + ปุ่มเปิด ticket ลงห้องแผงควบคุม */
@@ -459,11 +465,11 @@ async function postTicketPanel({ channelId, text, imageData, imageName, imageUrl
     const fd = new FormData();
     fd.append('payload_json', JSON.stringify(payload));
     fd.append('files[0]', new Blob([fileBuf]), fname);
-    r = await fetch(dcApi(`/channels/${channelId}/messages`), {
+    r = await ticketRequest(`/channels/${channelId}/messages`, {
       method: 'POST', headers: { Authorization: `Bot ${token}`, 'User-Agent': DC_UA }, body: fd,
     });
   } else {
-    r = await fetch(dcApi(`/channels/${channelId}/messages`), {
+    r = await ticketRequest(`/channels/${channelId}/messages`, {
       method: 'POST', headers: hdr(token), body: JSON.stringify(payload),
     });
   }
@@ -488,7 +494,7 @@ async function createTicket(body, staffRoleIds, categoryId) {
     // กันเปิดซ้ำ — หาห้องเดิมในหมวดนี้ที่ topic มีไอดีเขา
     findExisting: async () => {
       try {
-        const chs = await fetch(dcApi(`/guilds/${guildId}/channels`), {
+        const chs = await ticketRequest(`/guilds/${guildId}/channels`, {
           headers: hdr(token), signal: AbortSignal.timeout(8000),
         }).then((r) => r.json());
         return Array.isArray(chs) && chs.find(
@@ -502,7 +508,7 @@ async function createTicket(body, staffRoleIds, categoryId) {
       }
     },
     createChannel: async () => {
-      const res = await fetch(dcApi(`/guilds/${guildId}/channels`), {
+      const res = await ticketRequest(`/guilds/${guildId}/channels`, {
         method: 'POST', headers: hdr(token), signal: AbortSignal.timeout(8000),
         body: JSON.stringify({
           name: `ticket-${uname}`,
@@ -526,7 +532,7 @@ async function createTicket(body, staffRoleIds, categoryId) {
     announceExisting: (id) => editOriginal(appId, itoken, `คุณมีห้องที่เปิดอยู่แล้ว → <#${id}>`),
     announceOpened: (id) => editOriginal(appId, itoken, `เปิดห้องให้แล้ว → <#${id}>`),
     // ไม่ให้การส่งข้อความต้อนรับมาบล็อกการตอบลิงก์ห้อง Ticket
-    sendWelcome: (channelId) => fetch(dcApi(`/channels/${channelId}/messages`), {
+    sendWelcome: (channelId) => ticketRequest(`/channels/${channelId}/messages`, {
       method: 'POST', headers: hdr(token), signal: AbortSignal.timeout(8000),
       body: JSON.stringify({
         content: `<@${uid}> ${staffIds.map((r) => `<@&${r}>`).join(' ')}`,
@@ -2097,7 +2103,7 @@ async function handleInteraction(req, res, pubKey) {
       setTimeout(() => {
         closeTicketFlow({
           deleteChannel: async () => {
-            const deleted = await fetch(dcApi(`/channels/${chId}`), {
+            const deleted = await ticketRequest(`/channels/${chId}`, {
               method: 'DELETE', headers: hdr(token), signal: AbortSignal.timeout(8000),
             });
             if (deleted.ok) return;
