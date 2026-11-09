@@ -118,6 +118,7 @@ async function upstash(cmd) {
       method: 'POST',
       headers: { Authorization: `Bearer ${UP.token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(cmd),
+      signal: AbortSignal.timeout(8000),   // Upstash ค้าง = ไม่ให้หน้าแอดมินค้างตาม
     });
     return await r.json();
   } catch (e) { return { error: e.message }; }
@@ -139,8 +140,31 @@ async function getAccessMap() {
   return map;
 }
 
-async function setAccess(uid, rec) { return upstash(['HSET', 'mooni:access', uid, JSON.stringify(rec)]); }
-async function delAccess(uid) { return upstash(['HDEL', 'mooni:access', uid]); }
+async function setAccess(uid, rec) {
+  if (panelMaps.access) panelMaps.access[uid] = rec;
+  return upstash(['HSET', 'mooni:access', uid, JSON.stringify(rec)]);
+}
+async function delAccess(uid) {
+  if (panelMaps.access) delete panelMaps.access[uid];
+  return upstash(['HDEL', 'mooni:access', uid]);
+}
+
+/**
+ * แคชของหน้าแอดมิน: ตาราง "สิทธิ์ใช้แอป" + "วันหมดอายุยศ" จาก Upstash
+ * หน้าแอดมินขอข้อมูลบ่อย (เปิดหน้า / รีเฟรช / หลังกดทุกปุ่ม) — อ่าน Upstash ทุกครั้งช้าและเปลือง
+ * เก็บไว้ 30 วิ และอัปเดตตามทันทีตอนเราเขียนเอง (write-through) ข้อมูลเลยไม่เก่า
+ */
+const panelMaps = { at: 0, access: null, roleExp: null, inflight: null };
+async function panelLoadMaps(force = false) {
+  if (!STORE_ENABLED) return { access: {}, roleExp: {} };
+  if (!force && panelMaps.access && Date.now() - panelMaps.at < 30000) return panelMaps;
+  if (!panelMaps.inflight) {
+    panelMaps.inflight = Promise.all([getAccessMap(), getRoleExpMap()])
+      .then(([access, roleExp]) => { panelMaps.access = access; panelMaps.roleExp = roleExp; panelMaps.at = Date.now(); return panelMaps; })
+      .finally(() => { panelMaps.inflight = null; });
+  }
+  return panelMaps.inflight;
+}
 
 async function bloxgateRead(key, fallback) {
   const result = await upstash(['GET', key]);
@@ -287,6 +311,7 @@ async function botSetRoleDetail(uid, roleId, on) {
   const r = await dcFetch(`/guilds/${D.guildId}/members/${uid}/roles/${roleId}`, { method: on ? 'PUT' : 'DELETE' });
   if (r.ok) {
     cacheDropUid(uid);   // ยศเปลี่ยน → ล้างแคชของคนนี้ ให้เช็คครั้งต่อไปเห็นผลทันที
+    patchCachedMemberRole(uid, roleId, on);   // รายชื่อในหน้าแอดมินเห็นผลทันที ไม่ต้องรอแคชหมดอายุ
     return { ok: true, status: r.status, code: 0, error: '', hint: '' };
   }
   return { ok: false, status: r.status, code: r.code, error: r.error, hint: dcHint(r.status, r.code) };
@@ -294,6 +319,16 @@ async function botSetRoleDetail(uid, roleId, on) {
 async function botSetRole(uid, roleId, on) {
   const r = await botSetRoleDetail(uid, roleId, on);
   return r.ok;
+}
+
+/** แก้ยศในรายชื่อสมาชิกที่แคชไว้ (members:all) ตรง ๆ แทนการล้างทิ้งแล้วดึงทั้งเซิร์ฟเวอร์ใหม่ */
+function patchCachedMemberRole(uid, roleId, on) {
+  const e = dcCache.get('members:all');
+  if (!e || !e.v || !Array.isArray(e.v.members)) return;
+  const flagOf = { [D.roleId]: 'mooni', [D.primeRoleId]: 'prime', [D.mcRoleId]: 'mc', [D.candyRoleId]: 'candy', [D.farmerRoleId]: 'farmer', [D.diamondRoleId]: 'diamond', [D.parkourRoleId]: 'parkour', [D.parkourv2RoleId]: 'parkourv2', [D.speedrunRoleId]: 'speedrun' };
+  const flag = flagOf[roleId];
+  const m = e.v.members.find((x) => x.uid === String(uid));
+  if (flag && m) m[flag] = !!on;
 }
 
 function memberAvatar(m) {
@@ -327,7 +362,30 @@ async function botListMembers() {
       parkourv2: D.parkourv2RoleId ? (Array.isArray(m.roles) && m.roles.includes(D.parkourv2RoleId)) : false,
       speedrun: D.speedrunRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.speedrunRoleId)) : false,
     })) };
-  return cacheSet('members:all', out, 20000);
+  return cacheSet('members:all', out, 60000);
+}
+
+/** ข้อมูลสมาชิก 1 คนสำหรับหน้าแอดมิน (ยศ + วันหมดอายุแต่ละยศ + ออนไลน์ไหม) */
+function panelMember(m, maps) {
+  const accessMap = maps.access || {};
+  const roleExpMap = maps.roleExp || {};
+  const ex = (rid) => (rid ? (roleExpMap[`${m.uid}:${rid}`] || 0) : 0);
+  return {
+    ...m,
+    exp: accessMap[m.uid]?.exp || 0,
+    mcExp: ex(D.mcRoleId), mooniExp: ex(D.roleId), primeExp: ex(D.primeRoleId),
+    candyExp: ex(D.candyRoleId), farmerExp: ex(D.farmerRoleId), diamondExp: ex(D.diamondRoleId),
+    parkourExp: ex(D.parkourRoleId), parkourv2Exp: ex(D.parkourv2RoleId), speedrunExp: ex(D.speedrunRoleId),
+    active: (Date.now() - (lastSeen.get(m.uid) || 0)) < ACTIVE_WINDOW,
+  };
+}
+
+/** หลังแก้ยศ/เวลา: ส่งข้อมูลล่าสุดของคนนั้นกลับไป หน้าแอดมินจะได้อัปเดตแค่การ์ดเดียว */
+async function panelMemberOf(uid) {
+  const listRes = cacheGet('members:all');
+  const base = listRes?.members?.find((x) => x.uid === String(uid));
+  if (!base) return null;
+  return panelMember(base, await panelLoadMaps());
 }
 
 /* ---------- ปุ่มรับยศใน Discord (Interactions) ---------- */
@@ -765,8 +823,14 @@ async function verifySlip(buf, filename) {
 }
 
 /** ยศที่ซื้อแบบมีวันหมดอายุ — เก็บ (uid:roleId -> เวลา ms) แล้วกวาดถอดเองเมื่อหมดอายุ */
-const setRoleExpiry = (uid, roleId, exp) => upstash(['HSET', 'mooni:roleexp', `${uid}:${roleId}`, String(exp)]);
-const delRoleExpiry = (uid, roleId) => upstash(['HDEL', 'mooni:roleexp', `${uid}:${roleId}`]);
+const setRoleExpiry = (uid, roleId, exp) => {
+  if (panelMaps.roleExp) panelMaps.roleExp[`${uid}:${roleId}`] = Number(exp) || 0;
+  return upstash(['HSET', 'mooni:roleexp', `${uid}:${roleId}`, String(exp)]);
+};
+const delRoleExpiry = (uid, roleId) => {
+  if (panelMaps.roleExp) delete panelMaps.roleExp[`${uid}:${roleId}`];
+  return upstash(['HDEL', 'mooni:roleexp', `${uid}:${roleId}`]);
+};
 
 /** อ่านวันหมดอายุยศทั้งหมด → map ของ "uid:roleId" -> เวลา ms */
 async function getRoleExpMap() {
@@ -1387,648 +1451,9 @@ const ADMIN_HTML = `<!DOCTYPE html><html lang="th"><head>
 /* ==================================================================
  * หน้าเว็บแอดมิน /panel — จัดการยศ + วันหมดอายุ + ดูใครใช้งานอยู่
  * ================================================================== */
-const PANEL_HTML = `<!DOCTYPE html><html lang="th"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mooni — จัดการสมาชิก</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  :root{
-    --bg:#050a17;--card:rgba(255,255,255,.04);--card2:rgba(255,255,255,.07);
-    --line:rgba(255,255,255,.1);--line2:rgba(255,255,255,.18);
-    --text:#e9f1ff;--muted:#8aa0c6;--accent:#4c8dff;--accent2:#22d3ee;
-    --green:#3ddc97;--gold:#ffcf6b;--red:#ff6b7f;--blue:#5fb0ff;
-    --ink:#04101f;
-    --grad:linear-gradient(135deg,#4c8dff,#22d3ee);
-  }
-  html{-webkit-text-size-adjust:100%}
-  body{min-height:100vh;padding:30px 18px;color:var(--text);
-    font-family:'Anuphan','Noto Sans Thai',system-ui,'Segoe UI',sans-serif;
-    font-size:14px;line-height:1.55;letter-spacing:.1px;
-    background:
-      radial-gradient(900px 500px at 10% -14%,rgba(76,141,255,.20),transparent 58%),
-      radial-gradient(780px 480px at 102% -6%,rgba(34,211,238,.15),transparent 58%),
-      radial-gradient(1000px 720px at 50% 118%,rgba(59,130,246,.10),transparent 62%),
-      var(--bg);
-    background-attachment:fixed}
-  .wrap{max-width:1060px;margin:0 auto}
-  h1{font-size:25px;font-weight:700;letter-spacing:-.3px;
-    background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
-  p.sub{font-size:13px;color:var(--muted);margin:7px 0 22px;max-width:720px}
-  .bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
-  input,select,textarea{padding:11px 14px;background:rgba(0,0,0,.28);color:var(--text);
-    border:1.5px solid var(--line);border-radius:12px;font:inherit;font-size:13.5px;
-    transition:border-color .15s,box-shadow .15s,background .15s}
-  input::placeholder,textarea::placeholder{color:#7d7183}
-  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
-    box-shadow:0 0 0 3px rgba(76,141,255,.2);background:rgba(0,0,0,.42)}
-  select{cursor:pointer}
-  .btn{padding:10px 16px;background:var(--card2);color:var(--text);border:1.5px solid var(--line);
-    border-radius:12px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;
-    transition:transform .12s,border-color .15s,background .15s,box-shadow .15s}
-  .btn:hover{border-color:var(--line2);background:rgba(255,255,255,.09)}
-  .btn:active{transform:translateY(1px)}
-  .btn.pink{background:var(--grad);color:var(--ink);border:none;font-weight:700;
-    box-shadow:0 10px 24px -12px rgba(76,141,255,.95)}
-  .btn.pink:hover{box-shadow:0 12px 30px -12px rgba(34,211,238,.95);filter:brightness(1.06)}
-  .face{width:34px;height:34px;border-radius:50%;background:#0f1c33 center/cover;border:2px solid var(--line2);flex:none}
-  .mini{padding:7px 12px;font-size:11.5px;border-radius:10px}
-  #login{max-width:360px;margin:12vh auto 0;padding:32px 28px;background:var(--card);
-    border:1.5px solid var(--line);border-radius:22px;backdrop-filter:blur(12px);
-    box-shadow:0 34px 90px -34px rgba(0,0,0,.85)}
-  #login h1{margin-bottom:18px;font-size:22px}
-  #login input{width:100%;margin-bottom:12px}
-  #login .btn{width:100%;padding:12px}
-  .msg{font-size:12.5px;color:var(--red);min-height:16px;margin:8px 0}
-  .warn{background:rgba(255,107,127,.12);border:1.5px solid rgba(255,107,127,.45);
-    border-radius:14px;padding:12px 14px;margin:0 0 14px;font-size:12.5px;line-height:1.65;color:#ffd9df}
-  .diag{margin:0 0 14px;padding:14px 16px;border-radius:14px;background:var(--card);
-    border:1.5px solid var(--line);font-size:12.5px;display:flex;flex-direction:column;gap:9px}
-  .diag b.t{color:var(--accent);font-size:13.5px}
-  .diag .row{display:flex;gap:9px;align-items:flex-start}
-  .diag .row i{font-style:normal;flex:none;font-weight:600}
-  .diag .row span{color:var(--muted)}
-  .diag .ok{color:var(--green)}.diag .bad{color:var(--red)}
-  .hidden{display:none}
-  .count{font-size:12.5px;color:var(--muted)}
-  .rb{margin-bottom:14px;background:var(--card);border:1.5px solid var(--line);
-    border-radius:16px;padding:2px 18px;backdrop-filter:blur(10px)}
-  .rb summary{cursor:pointer;font-size:14px;font-weight:700;color:var(--accent);
-    padding:15px 0;list-style:none;display:flex;align-items:center;gap:9px}
-  .rb summary::-webkit-details-marker{display:none}
-  .rb summary::before{content:'▸';color:var(--muted);transition:transform .2s;font-size:11px}
-  .rb[open] summary::before{transform:rotate(90deg)}
-  .rb-body{margin:2px 0 18px;display:flex;flex-direction:column;gap:12px}
-  .rb-body label{display:flex;flex-direction:column;gap:6px;font-size:11.5px;color:var(--muted);flex:1}
-  .rb-body input,.rb-body textarea{width:100%}
-  .rb-body textarea{resize:vertical}
-  .rb-row{display:flex;gap:12px;flex-wrap:wrap}
-  .rb-body .btn{align-self:flex-start;padding:11px 18px}
-  hr{border:none;border-top:1.5px solid var(--line);margin:4px 0}
-  a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
-  ::-webkit-scrollbar{height:9px;width:9px}
-  ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:999px}
-  ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.24)}
-  /* ===== ธีมฟ้า: แท็บ · การ์ดสมาชิก · หน้าต่างตั้งค่า ===== */
-  .top{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:16px}
-  h1{font-size:26px}
-  h1 span{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
-  .count b{color:#fff}
-  .count .on{color:var(--green)}
-  .seg{display:flex;gap:6px;flex-wrap:wrap;background:rgba(255,255,255,.035);border:1.5px solid var(--line);
-    border-radius:16px;padding:6px;margin-bottom:18px;backdrop-filter:blur(12px);position:sticky;top:12px;z-index:20}
-  .seg button{flex:1 1 0;min-width:120px;padding:10px 12px;border:none;border-radius:11px;background:transparent;
-    color:var(--muted);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
-  .seg button:hover{color:var(--text);background:rgba(255,255,255,.06)}
-  .seg button.on{background:var(--grad);color:var(--ink);font-weight:700;box-shadow:0 10px 24px -12px rgba(76,141,255,.95)}
-  .pane{display:none}
-  .pane.on{display:block;animation:fadein .2s ease}
-  @keyframes fadein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
-  .mcard{position:relative;overflow:hidden;background:var(--card);border:1.5px solid var(--line);border-radius:18px;
-    padding:14px;cursor:pointer;backdrop-filter:blur(10px);transition:transform .14s,border-color .16s,box-shadow .16s}
-  .mcard::after{content:'';position:absolute;right:-40px;bottom:-60px;width:150px;height:150px;
-    background:radial-gradient(circle,rgba(76,141,255,.3),transparent 70%);opacity:0;transition:opacity .2s}
-  .mcard:hover{transform:translateY(-3px);border-color:rgba(76,141,255,.55);box-shadow:0 22px 44px -26px rgba(76,141,255,.85)}
-  .mcard:hover::after{opacity:1}
-  .mhead{display:flex;align-items:center;gap:11px}
-  .mwho{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:4px}
-  .mwho b{max-width:100%;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .badge{font-size:10.5px;font-weight:700;letter-spacing:.3px;padding:2px 9px;border-radius:999px;
-    border:1.5px solid var(--line2);color:var(--muted)}
-  .badge.live{color:#04211a;background:linear-gradient(135deg,#7ff0bb,#3ddc97);border-color:transparent}
-  .gear{color:var(--muted);font-size:15px;transition:transform .18s,color .18s}
-  .mcard:hover .gear{color:var(--accent);transform:rotate(45deg)}
-  .mpills{position:relative;display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
-  .pill{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:9px;font-size:11.5px;
-    font-weight:600;background:rgba(255,255,255,.05);border:1.5px solid var(--line)}
-  .pill i{font-style:normal;font-size:10.5px;font-weight:500;color:var(--muted)}
-  .pill.ok{background:rgba(61,220,151,.13);border-color:rgba(61,220,151,.35)}
-  .pill.blue{background:rgba(76,141,255,.15);border-color:rgba(76,141,255,.4)}
-  .pill.danger{background:rgba(255,107,127,.13);border-color:rgba(255,107,127,.4)}
-  .pill.none{color:var(--muted)}
-  .empty{grid-column:1/-1;padding:40px;text-align:center;color:var(--muted);
-    border:1.5px dashed var(--line);border-radius:18px}
-  /* หน้าต่างตั้งค่าสมาชิก */
-  .modal{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;
-    background:rgba(3,7,18,.74);backdrop-filter:blur(7px)}
-  .modal.hidden{display:none}
-  .sheet{width:100%;max-width:660px;max-height:88vh;overflow-y:auto;padding:20px;border-radius:24px;
-    background:linear-gradient(180deg,#0d1730,#080e1e);border:1.5px solid rgba(76,141,255,.3);
-    box-shadow:0 40px 100px -40px rgba(0,0,0,.95);animation:pop .2s ease}
-  @keyframes pop{from{opacity:0;transform:translateY(16px) scale(.98)}to{opacity:1;transform:none}}
-  .shead{display:flex;align-items:center;gap:12px;padding-bottom:14px;border-bottom:1.5px solid var(--line)}
-  .shead .face{width:46px;height:46px}
-  .shead .swho{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:4px}
-  .shead b{max-width:100%;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .x{width:34px;height:34px;flex:none;border-radius:11px;cursor:pointer;font-size:14px;
-    background:rgba(255,255,255,.06);border:1.5px solid var(--line);color:var(--text)}
-  .x:hover{border-color:var(--red);color:var(--red)}
-  .hint{margin:12px 0;font-size:12px;color:var(--muted)}
-  .sblock{display:flex;flex-direction:column;gap:8px}
-  .sblock+.sblock{margin-top:14px;padding-top:14px;border-top:1.5px dashed var(--line)}
-  .srow{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px 12px;
-    padding:11px 13px;border-radius:15px;background:rgba(255,255,255,.032);border:1.5px solid var(--line)}
-  .sw{position:relative;width:42px;height:23px;flex:none;border-radius:999px;cursor:pointer;
-    background:rgba(255,255,255,.1);border:1.5px solid var(--line2)}
-  .sw i{position:absolute;top:2.5px;left:3px;width:15px;height:15px;border-radius:50%;background:#7d8fb0;transition:.18s}
-  .sw.on{background:var(--grad);border-color:transparent}
-  .sw.on i{left:22px;background:var(--ink)}
-  .sw.busy{opacity:.5}
-  .appico{width:42px;flex:none;text-align:center;font-size:17px}
-  .sinfo{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
-  .sinfo b{font-size:13.5px}
-  .st{font-size:11.5px;color:var(--muted)}
-  .st.ok{color:var(--green)}.st.perm{color:var(--blue)}.st.gone{color:var(--red)}
-  .schips{display:flex;grid-column:1/-1;flex-wrap:wrap;gap:6px}
-  .chip{padding:6px 11px;font:inherit;font-size:11.5px;font-weight:600;border-radius:9px;cursor:pointer;
-    background:rgba(255,255,255,.05);border:1.5px solid var(--line);color:var(--text);transition:.14s}
-  .chip:hover{border-color:var(--accent);background:rgba(76,141,255,.18)}
-  .chip.ghost{border-style:dashed;color:var(--muted)}
-  .chip.ok{background:var(--grad);color:var(--ink);border-color:transparent}
-  .chip.del:hover{border-color:var(--red);background:rgba(255,107,127,.16);color:#ffd9de}
-  .crow{display:flex;grid-column:1/-1;align-items:center;gap:6px;flex-wrap:wrap}
-  .crow.hidden{display:none}
-  .crow input{width:82px;padding:7px 10px;font-size:12px;border-radius:9px}
-  .crow select{padding:7px 10px;font-size:12px;border-radius:9px}
-  .sfoot{display:flex;justify-content:flex-end;margin-top:18px}
-  .subttl{display:block;margin:2px 0 10px;color:var(--accent);font-size:13px}
-  input[type=file]{padding:9px 12px;color:var(--muted);cursor:pointer}
-  input[type=file]::file-selector-button{margin-right:10px;padding:7px 14px;border-radius:9px;cursor:pointer;
-    background:rgba(76,141,255,.18);border:1.5px solid rgba(76,141,255,.45);color:var(--text);font:inherit;font-size:12px;font-weight:600}
-  input[type=file]::file-selector-button:hover{background:rgba(76,141,255,.3)}
-  .divider{border:none;border-top:1.5px solid var(--line);margin:14px 0}
-  .toast{position:fixed;left:50%;bottom:26px;z-index:80;padding:11px 20px;border-radius:14px;
-    font-size:13px;font-weight:600;color:#fff;opacity:0;pointer-events:none;transform:translate(-50%,18px);
-    background:rgba(13,23,48,.96);border:1.5px solid rgba(76,141,255,.55);transition:.22s}
-  .toast.show{opacity:1;transform:translate(-50%,0)}
-  .toast.bad{border-color:rgba(255,107,127,.65)}
-  @media(max-width:560px){.seg button{min-width:0;flex:1 1 44%}.sheet{padding:16px;border-radius:20px}}
-</style></head><body>
-<div id="login">
-  <h1>🔑 เข้าหน้าจัดการ</h1>
-  <input id="key" type="password" placeholder="รหัสแอดมิน (ADMIN_KEY)">
-  <button class="btn pink" id="enter">เข้า</button>
-  <div class="msg" id="lmsg"></div>
-</div>
-<div class="wrap hidden" id="panel">
-  <header class="top">
-    <div>
-      <h1>จัดการสมาชิก <span>Mooni</span></h1>
-      <p class="sub" style="margin:7px 0 0">แตะการ์ดสมาชิกเพื่อเปิดหน้าต่างจัดการยศและเวลา · ⚡ ออนไลน์ = กำลังใช้งานอยู่</p>
-    </div>
-    <span class="count" id="count"></span>
-  </header>
-
-  <nav class="seg" id="seg">
-    <button class="on" data-tab="members">👥 สมาชิก</button>
-    <button data-tab="give">🎁 ปุ่ม Discord</button>
-    <button data-tab="shop">🛒 ร้านค้า</button>
-    <button data-tab="maps">🎮 แมพเกม</button>
-  </nav>
-
-  <section class="pane on" data-pane="members">
-    <div class="bar">
-      <input id="search" placeholder="🔎 ค้นหาชื่อสมาชิก…" style="flex:1;min-width:170px">
-      <button class="btn" id="diagBtn">🩺 ตรวจระบบ</button>
-      <button class="btn" id="refresh">↻ รีเฟรช</button>
-    </div>
-    <div class="msg" id="pmsg"></div>
-    <div class="warn hidden" id="warn"></div>
-    <div class="diag hidden" id="diag"></div>
-    <div class="cards" id="cards"></div>
-  </section>
-
-  <section class="pane" data-pane="give">
-  <details class="rb">
-    <summary>🎁 ส่งปุ่มรับยศเข้า Discord</summary>
-    <div class="rb-body">
-      <div class="rb-row">
-        <label>ไอดีห้อง (คลิกขวาห้อง → Copy Channel ID)<input id="rbChannel" value="1529781693417001031"></label>
-        <label>ไอดียศที่จะให้<input id="rbRole" value="1484626107721322747"></label>
-      </div>
-      <label>ข้อความด้านบน<textarea id="rbText" rows="3" placeholder="เช่น กดปุ่มด้านล่างเพื่อรับยศสมาชิก 🎉"></textarea></label>
-      <div class="rb-row">
-        <label>อัปโหลดรูปจากเครื่อง<input id="rbFile" type="file" accept="image/*"></label>
-        <label>หรือใส่ลิงก์รูป<input id="rbImage" placeholder="https://..."></label>
-        <label style="max-width:130px">ชื่อปุ่ม<input id="rbLabel" value="รับยศ"></label>
-      </div>
-      <button class="btn pink" id="rbSend">ส่งเข้าห้อง Discord</button>
-      <div class="msg" id="rbMsg"></div>
-    </div>
-  </details>
-
-  <details class="rb">
-    <summary>🎫 ส่งปุ่มเปิด Ticket (บอท ☁️Muffin)</summary>
-    <div class="rb-body">
-      <div class="rb-row">
-        <label>ไอดีห้องที่จะวางปุ่ม<input id="tkChannel" value="1484627407695511582"></label>
-        <label>ไอดียศทีมงาน — หลายยศคั่นด้วย , <input id="tkRole" value="1484626455928373279,1484626578943246518"></label>
-      </div>
-      <label>ไอดีหมวดหมู่ที่จะสร้างห้อง<input id="tkCat" value="1530270907116028086"></label>
-      <label>ข้อความด้านบน<textarea id="tkText" rows="3" placeholder="เช่น มีปัญหาหรือต้องการติดต่อทีมงาน กดปุ่มด้านล่างได้เลย 🎫"></textarea></label>
-      <div class="rb-row">
-        <label>อัปโหลดรูปจากเครื่อง<input id="tkFile" type="file" accept="image/*"></label>
-        <label>หรือใส่ลิงก์รูป<input id="tkImage" placeholder="https://..."></label>
-        <label style="max-width:150px">ชื่อปุ่ม<input id="tkLabel" value="🎫 เปิด Ticket"></label>
-      </div>
-      <button class="btn pink" id="tkSend">ส่งเข้าห้อง Discord</button>
-      <div class="msg" id="tkMsg"></div>
-    </div>
-  </details>
-  </section>
-
-  <section class="pane" data-pane="shop">
-  <details class="rb">
-    <summary>🛒 ร้านค้า — ตั้งค่า + สินค้า <a href="/shop" target="_blank">เปิดหน้าร้าน /shop</a></summary>
-    <div class="rb-body">
-      <div class="rb-row">
-        <label>ชื่อร้าน<input id="shName" placeholder="Mooni Shop"></label>
-        <label>ห้องรับออเดอร์ (Copy Channel ID)<input id="shChannel" placeholder="ไอดีห้องแอดมิน"></label>
-      </div>
-      <label>คำโปรยใต้ชื่อร้าน<input id="shNote" placeholder="โอนแล้วแนบสลิป รออนุมัติ"></label>
-      <div class="rb-row">
-        <label>เบอร์/พร้อมเพย์<input id="shPayNum" placeholder="0812345678"></label>
-        <label>ชื่อบัญชี<input id="shPayName" placeholder="ชื่อ นามสกุล"></label>
-        <label>รูป QR (ไม่ใส่ก็ได้)<input id="shQr" type="file" accept="image/*"></label>
-      </div>
-      <button class="btn pink" id="shSaveSettings">บันทึกตั้งค่าร้าน</button>
-      <div class="msg" id="shSetMsg"></div>
-
-      <hr class="divider">
-      <b class="subttl">➕ เพิ่ม/แก้สินค้า</b>
-      <label>ชื่อสินค้า<input id="pName" placeholder="เช่น ยศ VIP"></label>
-      <div class="rb-row">
-        <label style="max-width:150px">ราคา 30 วัน (บาท)<input id="pPrice30" type="number" min="0" value="0"></label>
-        <label style="max-width:150px">ราคา 90 วัน (บาท)<input id="pPrice90" type="number" min="0" value="0"></label>
-      </div>
-      <label>รายละเอียด<textarea id="pDesc" rows="2" placeholder="อธิบายสินค้า"></textarea></label>
-      <div class="rb-row">
-        <label>ไอดียศที่จะได้<input id="pRole" value="1529344448817791016"></label>
-        <label>รูปสินค้า<input id="pImg" type="file" accept="image/*"></label>
-      </div>
-      <input type="hidden" id="pId">
-      <button class="btn pink" id="pSave">บันทึกสินค้า</button>
-      <button class="btn" id="pClear">ล้างฟอร์ม</button>
-      <div class="msg" id="pMsg2"></div>
-      <div id="pList"></div>
-    </div>
-  </details>
-  </section>
-
-  <section class="pane" data-pane="maps">
-  <details class="rb">
-    <summary>🎮 แมพเกม — แก้ชื่อ, ราคา, รูป, Discord (แก้ได้ทันทีไม่ต้องอัพเดตแอพ)</summary>
-    <div class="rb-body">
-      <div class="rb-row">
-        <label>Discord Guild ID (เซิร์ฟเวอร์) <input id="mapDiscordGuild" placeholder="ใส่ Guild ID จาก Discord"></label>
-        <label>Discord Channel ID สำหรับปุ่ม BUY<input id="mapDiscordCh" placeholder="1484627407695511582"></label>
-      </div>
-      <div id="mapList"></div>
-      <hr class="divider">
-      <b class="subttl">➕ เพิ่ม/แก้แมพ</b>
-      <div class="rb-row">
-        <label>ID แมพ<input id="mpId" placeholder="เช่น farmer"></label>
-        <label>ชื่อแมพ<input id="mpName" placeholder="เช่น Mooni Farm"></label>
-      </div>
-      <div class="rb-row">
-        <label>ราคา<input id="mpPrice" placeholder="เช่น 219฿"></label>
-        <label>รูปแมพ<input id="mpImg" placeholder="เช่น farmer-card.png"></label>
-        <label>Emoji<input id="mpEmoji" placeholder="เช่น 🌾"></label>
-      </div>
-      <div class="rb-row">
-        <label>ยศที่ต้องมี<input id="mpRole" placeholder="เช่น farmer"></label>
-        <label style="max-width:100px;flex:none"><input type="checkbox" id="mpNew"> แสดงป้าย NEW</label>
-      </div>
-      <input type="hidden" id="mpEditId">
-      <button class="btn pink" id="mpSave">บันทึกแมพ</button>
-      <button class="btn" id="mpClear">ล้างฟอร์ม</button>
-      <div class="msg" id="mpMsg"></div>
-    </div>
-  </details>
-
-  </section>
-
-  <div class="modal hidden" id="modal"><div class="sheet" id="sheet"></div></div>
-</div>
-<div class="toast" id="toast"></div>
-<script>
-  const $=id=>document.getElementById(id);
-  let KEY='';   // ไม่จำรหัสไว้ในเบราว์เซอร์ — ต้องใส่รหัสเองทุกครั้งที่เข้าหน้าแผง
-  let members=[];
-
-  async function call(path,body){
-    const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:KEY,...body})});
-    if(r.status===401)throw new Error('รหัสไม่ถูก');
-    if(!r.ok)throw new Error('ผิดพลาด '+r.status);
-    return r.json();
-  }
-  function fmtExp(exp){
-    if(!exp)return['ถาวร','perm'];
-    const left=exp-Date.now();
-    if(left<=0)return['หมดอายุ','gone'];
-    const d=Math.floor(left/86400000),h=Math.floor(left%86400000/3600000),m=Math.floor(left%3600000/60000);
-    if(d>0)return['เหลือ '+d+' วัน '+h+' ชม.',''];
-    if(h>0)return['เหลือ '+h+' ชม. '+m+' นาที',''];
-    return['เหลือ '+m+' นาที',''];
-  }
-  /* ยศทั้งหมดที่จัดการได้ในหน้าต่างตั้งค่า */
-  const SERVERS=[
-    {id:'mooni',name:'Mooni',emoji:'🌙',flag:'mooni',exp:'mooniExp'},
-    {id:'prime',name:'Pro',emoji:'⚡',flag:'prime',exp:'primeExp'},
-    {id:'mc',name:'Minecraft',emoji:'⛏️',flag:'mc',exp:'mcExp'},
-    {id:'candy',name:'Candy Block',emoji:'🍬',flag:'candy',exp:'candyExp'},
-    {id:'farmer',name:'Farmer',emoji:'🌾',flag:'farmer',exp:'farmerExp'},
-    {id:'diamond',name:'Diamond',emoji:'💎',flag:'diamond',exp:'diamondExp'},
-    {id:'parkour',name:'Parkour',emoji:'🏃',flag:'parkour',exp:'parkourExp'},
-    {id:'parkourv2',name:'Parkour V2',emoji:'🏃',flag:'parkourv2',exp:'parkourv2Exp'},
-    {id:'speedrun',name:'Diamond Speedrun',emoji:'⛏️',flag:'speedrun',exp:'speedrunExp'},
-  ];
-  const QUICK=[['1 วัน',86400000],['7 วัน',604800000],['30 วัน',2592000000],['90 วัน',7776000000]];
-  const short=t=>t.indexOf('เหลือ ')===0?t.slice(6):t;          // "เหลือ 3 วัน" -> "3 วัน"
-  const tone=c=>c==='gone'?'danger':c==='perm'?'blue':'ok';     // สีของป้ายตามสถานะ
-  function paintAvatars(root){
-    (root||document).querySelectorAll('.face[data-av]').forEach(el=>{
-      if(el.dataset.av)el.style.backgroundImage='url('+JSON.stringify(el.dataset.av)+')';
-    });
-  }
-  function memberCard(m){
-    let pills='';
-    SERVERS.forEach(s=>{
-      if(!m[s.flag])return;
-      const[t,c]=fmtExp(m[s.exp]);
-      pills+='<span class="pill '+tone(c)+'">'+s.emoji+' '+s.name+'<i>'+short(t)+'</i></span>';
-    });
-    const[at,ac]=fmtExp(m.exp);
-    return '<article class="mcard" data-uid="'+m.uid+'">'+
-      '<div class="mhead"><div class="face" data-av="'+esc(m.avatar||'')+'"></div>'+
-        '<div class="mwho"><b>'+esc(m.name)+'</b><span class="badge '+(m.active?'live':'off')+'">'+(m.active?'ออนไลน์':'ออฟไลน์')+'</span></div>'+
-        '<span class="gear">⚙</span></div>'+
-      '<div class="mpills">'+(pills||'<span class="pill none">ยังไม่มียศ</span>')+
-        '<span class="pill '+tone(ac)+'">📱 แอป<i>'+short(at)+'</i></span></div></article>';
-  }
-  function render(){
-    const q=$('search').value.trim().toLowerCase();
-    const list=members.filter(m=>!q||m.name.toLowerCase().includes(q));
-    $('count').innerHTML='<b>'+members.length+'</b> สมาชิก · <span class="on">'+members.filter(m=>m.active).length+' ออนไลน์</span>';
-    $('cards').innerHTML=list.map(memberCard).join('')||'<div class="empty">ไม่พบสมาชิกชื่อนี้</div>';
-    paintAvatars($('cards'));
-  }
-  function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-
-  let cur=null, toastT=null;    // cur = สมาชิกที่เปิดหน้าต่างตั้งค่าอยู่
-  async function load(){
-    try{
-      const d=await call('/panel/members',{});members=d.members||[];render();$('pmsg').textContent='';
-      const w=$('warn');
-      w.textContent=d.warning?'⚠️ '+d.warning:'';
-      if(d.storeCounts)w.textContent+=(w.textContent?' · ':'')+'ข้อมูลในคลัง: สิทธิ์ใช้แอป '+d.storeCounts.access+' รายการ · วันหมดอายุยศ '+d.storeCounts.roleExp+' รายการ';
-      w.classList.toggle('hidden',!w.textContent.trim());
-      if(cur){                                   // หน้าต่างเปิดอยู่ → อัปเดตข้อมูลสดในหน้าต่างด้วย
-        const uid=cur.uid;
-        cur=members.find(m=>m.uid===uid)||null;
-        if(cur)drawSheet();else closeMember();
-      }
-    }catch(e){$('pmsg').textContent=e.message;}
-  }
-
-  /* ---------- หน้าต่างตั้งค่าสมาชิก (การ์ด → หน้าต่างแยก) ---------- */
-  function toast(msg,ok){
-    const el=$('toast');el.textContent=msg;el.className='toast show'+(ok===false?' bad':'');
-    clearTimeout(toastT);toastT=setTimeout(()=>{el.className='toast';},2200);
-  }
-  const chips=()=>QUICK.map(([lab,ms])=>'<button class="chip" data-act="set" data-ms="'+ms+'">'+lab+'</button>').join('')+
-    '<button class="chip" data-act="set" data-ms="0">♾ ถาวร</button>'+
-    '<button class="chip ghost" data-act="custom">✎ กำหนดเอง</button>';
-  const customRow=()=>'<div class="crow hidden"><input type="number" class="cnum" min="1" value="3">'+
-    '<select class="cunit"><option value="60">นาที</option><option value="3600">ชั่วโมง</option>'+
-    '<option value="86400" selected>วัน</option><option value="2592000">เดือน</option></select>'+
-    '<button class="chip ok" data-act="customset">ตั้งเวลา</button></div>';
-  function drawSheet(){
-    const m=cur;if(!m)return;
-    const roleRow=s=>{
-      const has=!!m[s.flag];const[t,c]=fmtExp(m[s.exp]);
-      return '<div class="srow" data-role="'+s.id+'">'+
-        '<button class="sw '+(has?'on':'')+'" data-act="toggle" title="'+(has?'ถอดยศ':'ให้ยศ')+'"><i></i></button>'+
-        '<div class="sinfo"><b>'+s.emoji+' '+s.name+'</b><span class="st '+(has?c:'')+'">'+(has?t:'ยังไม่มียศ')+'</span></div>'+
-        '<div class="schips">'+chips()+(has?'<button class="chip del" data-act="del">✕ ถอดยศ</button>':'')+'</div>'+
-        customRow()+'</div>';
-    };
-    const[at,ac]=fmtExp(m.exp);
-    $('sheet').innerHTML=
-      '<div class="shead"><div class="face" data-av="'+esc(m.avatar||'')+'"></div>'+
-        '<div class="swho"><b>'+esc(m.name)+'</b><span class="badge '+(m.active?'live':'off')+'">'+(m.active?'ออนไลน์':'ออฟไลน์')+'</span></div>'+
-        '<button class="x" data-act="close">✕</button></div>'+
-      '<p class="hint">สวิตช์ = ให้/ถอดยศทันที · ปุ่มวัน = ให้ยศพร้อมตั้งเวลาถอดเอง · ยังไม่มียศก็กดปุ่มวันได้เลย</p>'+
-      '<div class="sblock">'+SERVERS.map(roleRow).join('')+'</div>'+
-      '<div class="sblock"><div class="srow" data-role="app">'+
-        '<span class="appico">📱</span>'+
-        '<div class="sinfo"><b>สิทธิ์ใช้แอป</b><span class="st '+ac+'">'+at+'</span></div>'+
-        '<div class="schips">'+chips()+'<button class="chip del" data-act="del">✕ ตัดสิทธิ์</button></div>'+
-        customRow()+'</div></div>'+
-      '<div class="sfoot"><button class="btn" data-act="close">ปิดหน้าต่าง</button></div>';
-    paintAvatars($('sheet'));
-  }
-  async function openMember(uid){
-    cur=members.find(m=>m.uid===uid)||null;if(!cur)return;
-    drawSheet();$('modal').classList.remove('hidden');document.body.style.overflow='hidden';
-    await load();                                 // ดึงข้อมูลสดมาแสดง
-  }
-  function closeMember(){$('modal').classList.add('hidden');document.body.style.overflow='';cur=null;}
-
-  $('cards').addEventListener('click',e=>{
-    const c=e.target.closest('.mcard');if(c)openMember(c.dataset.uid);
-  });
-  $('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeMember();});
-  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMember();});
-
-  $('sheet').addEventListener('click',async e=>{
-    const el=e.target.closest('[data-act]');if(!el||!cur)return;
-    const act=el.dataset.act;
-    if(act==='close')return closeMember();
-    const row=el.closest('.srow');if(!row)return;
-    const role=row.dataset.role,isApp=role==='app';
-    const s=SERVERS.find(x=>x.id===role);
-    const uid=cur.uid;
-    try{
-      if(act==='custom'){                           // เปิดช่องใส่เวลากำหนดเอง
-        row.querySelector('.crow').classList.toggle('hidden');return;
-      }
-      if(act==='toggle'){                           // สวิตช์ให้/ถอดยศ
-        const on=!cur[s.flag];el.classList.add('busy');
-        await call('/panel/role',{uid,role,on});
-        await load();
-        return toast(on?'ให้ยศ '+s.name+' แล้ว ✓':'ถอดยศ '+s.name+' แล้ว',true);
-      }
-      el.classList.remove('busy');
-      let exp;
-      if(act==='customset'){
-        const n=Number(row.querySelector('.cnum').value)||0;
-        const unit=Number(row.querySelector('.cunit').value)||86400;
-        if(!n)return toast('ใส่จำนวนเวลาก่อน',false);
-        exp=Date.now()+n*unit*1000;
-      }else if(act==='del'){exp=Date.now()-1000;}
-      else{const ms=Number(el.dataset.ms);exp=ms===0?0:Date.now()+ms;}
-      if(isApp)await call('/panel/expiry',{uid,exp});
-      else await call('/panel/roleexpiry',{uid,role,exp});
-      await load();
-      toast(exp===0?'ตั้งเป็นถาวรแล้ว ✓':(exp<Date.now()?'เอาออกเรียบร้อย ✓':'ตั้งเวลาเรียบร้อย ✓'),true);
-    }catch(err){toast(err.message,false);}
-  });
-
-  /* ---------- สลับแท็บ (สมาชิก / ปุ่ม Discord / ร้านค้า / แมพ) ---------- */
-  $('seg').addEventListener('click',e=>{
-    const b=e.target.closest('button[data-tab]');if(!b)return;
-    document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b));
-    document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.dataset.pane===b.dataset.tab));
-  });
-  // อ่านไฟล์รูปเป็น base64 (ใช้ร่วมกันทั้ง 2 ฟอร์ม)
-  async function readImg(input){
-    const f=input.files[0]; if(!f)return{};
-    if(f.size>8*1024*1024)throw new Error('รูปใหญ่เกิน 8MB');
-    const imageData=await new Promise((res,rej)=>{const fr=new FileReader();
-      fr.onload=()=>res(String(fr.result).split(',')[1]);fr.onerror=()=>rej(new Error('อ่านไฟล์ไม่ได้'));
-      fr.readAsDataURL(f);});
-    return {imageData,imageName:f.name};
-  }
-  $('tkSend').addEventListener('click',async()=>{
-    const b=$('tkSend');b.disabled=true;$('tkMsg').style.color='#8ea6cc';$('tkMsg').textContent='กำลังส่ง…';
-    try{
-      const img=await readImg($('tkFile'));
-      await call('/panel/ticketpanel',{channelId:$('tkChannel').value.trim(),staffRoleId:$('tkRole').value.trim(),
-        categoryId:$('tkCat').value.trim(),text:$('tkText').value,imageUrl:$('tkImage').value.trim(),
-        ...img,buttonLabel:$('tkLabel').value.trim()});
-      $('tkMsg').style.color='#3ddc97';$('tkMsg').textContent='✅ ส่งเข้าห้องแล้ว';
-    }catch(e){$('tkMsg').style.color='#ff6b7f';$('tkMsg').textContent=e.message;}
-    finally{b.disabled=false;}
-  });
-  /* ---- ร้านค้า ---- */
-  function fileToData(input){
-    const f=input.files[0]; if(!f)return Promise.resolve(null);
-    if(f.size>2*1024*1024)return Promise.reject(new Error('รูปใหญ่เกิน 2MB'));
-    return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>rej(new Error('อ่านไฟล์ไม่ได้'));fr.readAsDataURL(f)});
-  }
-  async function loadShop(){
-    try{
-      const d=await call('/panel/shop/get',{});const s=d.settings||{};
-      $('shName').value=s.shopName||'';$('shNote').value=s.shopNote||'';
-      $('shPayNum').value=s.payNumber||'';$('shPayName').value=s.payName||'';$('shChannel').value=s.adminChannelId||'';
-      $('pList').innerHTML=(d.products||[]).map(p=>
-        '<div style="display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">'+
-        (p.image?'<img src="'+p.image+'" style="width:38px;height:38px;object-fit:cover;border:2px solid rgba(255,255,255,.14)">':'')+
-        '<div style="flex:1"><b>'+esc(p.name)+'</b> · '+[p.price30?'30ว ฿'+p.price30:'',p.price90?'90ว ฿'+p.price90:''].filter(Boolean).join(' / ')+(p.active===false?' <span style="color:#ff6b7f">(ปิด)</span>':'')+'</div>'+
-        '<button class="btn mini" data-ed="'+p.id+'">แก้</button>'+
-        '<button class="btn mini" data-del="'+p.id+'" style="border-color:rgba(255,107,127,.45)">ลบ</button></div>').join('')||'<p style="color:#8ea6cc;font-size:12px;margin-top:8px">ยังไม่มีสินค้า</p>';
-      window.__products=d.products||[];
-    }catch(e){$('pMsg2').style.color='#ff6b7f';$('pMsg2').textContent=e.message;}
-  }
-  $('shSaveSettings').addEventListener('click',async()=>{
-    const b=$('shSaveSettings');b.disabled=true;$('shSetMsg').style.color='#8ea6cc';$('shSetMsg').textContent='กำลังบันทึก…';
-    try{
-      const qr=await fileToData($('shQr'));
-      await call('/panel/shop/settings',{shopName:$('shName').value.trim(),shopNote:$('shNote').value.trim(),
-        payNumber:$('shPayNum').value.trim(),payName:$('shPayName').value.trim(),adminChannelId:$('shChannel').value.trim(),
-        ...(qr?{payQr:qr}:{})});
-      $('shSetMsg').style.color='#3ddc97';$('shSetMsg').textContent='✅ บันทึกแล้ว';
-    }catch(e){$('shSetMsg').style.color='#ff6b7f';$('shSetMsg').textContent=e.message;}
-    finally{b.disabled=false;}
-  });
-  $('pSave').addEventListener('click',async()=>{
-    const b=$('pSave');b.disabled=true;$('pMsg2').style.color='#8ea6cc';$('pMsg2').textContent='กำลังบันทึก…';
-    try{
-      const img=await fileToData($('pImg'));
-      await call('/panel/shop/product',{id:$('pId').value,name:$('pName').value.trim(),desc:$('pDesc').value,
-        price30:$('pPrice30').value,price90:$('pPrice90').value,roleId:$('pRole').value.trim(),...(img!==null?{image:img}:{})});
-      $('pMsg2').style.color='#3ddc97';$('pMsg2').textContent='✅ บันทึกสินค้าแล้ว';
-      clearProd();loadShop();
-    }catch(e){$('pMsg2').style.color='#ff6b7f';$('pMsg2').textContent=e.message;}
-    finally{b.disabled=false;}
-  });
-  function clearProd(){$('pId').value='';$('pName').value='';$('pDesc').value='';$('pPrice30').value='0';$('pPrice90').value='0';$('pImg').value='';$('pRole').value='1529344448817791016';}
-  $('pClear').addEventListener('click',clearProd);
-  $('pList').addEventListener('click',async e=>{
-    const ed=e.target.dataset.ed,del=e.target.dataset.del;
-    if(ed){const p=(window.__products||[]).find(x=>x.id===ed);if(p){$('pId').value=p.id;$('pName').value=p.name;$('pDesc').value=p.desc||'';$('pPrice30').value=p.price30||0;$('pPrice90').value=p.price90||0;$('pRole').value=p.roleId||'';$('pName').scrollIntoView({behavior:'smooth'});}}
-    if(del&&confirm('ลบสินค้านี้?')){try{await call('/panel/shop/delproduct',{id:del});loadShop();}catch(err){alert(err.message)}}
-  });
-
-  $('search').addEventListener('input',render);
-  $('refresh').addEventListener('click',load);
-
-  /* ---------- ปุ่มตรวจระบบ: หาสาเหตุที่ดิสเชื่อมไม่ได้ ---------- */
-  $('diagBtn').addEventListener('click',async()=>{
-    const box=$('diag');box.classList.remove('hidden');box.textContent='กำลังตรวจ…';
-    try{
-      const d=await call('/panel/diag',{ticketChannel:$('tkChannel').value.trim(),ticketCategory:$('tkCat').value.trim()});
-      box.innerHTML='<b class="t">ผลตรวจระบบ</b>'+(d.checks||[]).map(c=>
-        '<div class="row"><i class="'+(c.ok?'ok':'bad')+'">'+(c.ok?'✅':'❌')+' '+esc(c.label)+'</i><span>'+esc(c.msg||'')+'</span></div>').join('');
-    }catch(e){box.innerHTML='<b class="t">ผลตรวจระบบ</b><div class="row"><i class="bad">❌ ตรวจไม่ได้: '+esc(e.message)+'</i></div>';}
-  });
-  $('rbSend').addEventListener('click',async()=>{
-    const b=$('rbSend');b.disabled=true;$('rbMsg').style.color='#8ea6cc';$('rbMsg').textContent='กำลังส่ง…';
-    try{
-      // มีไฟล์รูป -> อ่านเป็น base64 ส่งไปให้บอทแนบ
-      let imageData=null,imageName=null;
-      const f=$('rbFile').files[0];
-      if(f){
-        if(f.size>8*1024*1024)throw new Error('รูปใหญ่เกิน 8MB');
-        imageName=f.name;
-        imageData=await new Promise((res,rej)=>{const fr=new FileReader();
-          fr.onload=()=>res(String(fr.result).split(',')[1]);fr.onerror=()=>rej(new Error('อ่านไฟล์ไม่ได้'));
-          fr.readAsDataURL(f);});
-      }
-      await call('/panel/rolebutton',{channelId:$('rbChannel').value.trim(),roleId:$('rbRole').value.trim(),
-        text:$('rbText').value,imageUrl:$('rbImage').value.trim(),imageData,imageName,
-        buttonLabel:$('rbLabel').value.trim()});
-      $('rbMsg').style.color='#3ddc97';$('rbMsg').textContent='✅ ส่งเข้าห้องแล้ว';
-    }catch(e){$('rbMsg').style.color='#ff6b7f';$('rbMsg').textContent=e.message;}
-    finally{b.disabled=false;}
-  });
-  $('enter').addEventListener('click',async()=>{
-    const typed=$('key').value.trim();
-    if(!typed){$('lmsg').textContent='ใส่รหัสแอดมินก่อน';return;}   // ต้องใส่รหัสเองทุกครั้ง ไม่ล็อกอินให้เองแล้ว
-    KEY=typed;
-    try{await call('/panel/members',{});$('login').classList.add('hidden');$('panel').classList.remove('hidden');load();loadShop();loadMaps();setInterval(()=>{if(!cur&&!document.hidden)load();},30000);}   // ลดโหลดคำขอไปดิสคอร์ด (แท็บที่ซ่อนอยู่ไม่ต้องดึง)
-    catch(e){$('lmsg').textContent=e.message;}
-  });
-  /* ---- Maps config ---- */
-  let mapsData={maps:[],buyDiscordChannel:''};
-  async function loadMaps(){
-    try{const d=await call('/api/maps',{});mapsData=d;$('mapDiscordGuild').value=d.buyDiscordGuild||'';$('mapDiscordCh').value=d.buyDiscordChannel||'';renderMapList();}catch(e){$('mpMsg').style.color='#ff6b7f';$('mpMsg').textContent=e.message;}
-  }
-  function renderMapList(){
-    $('mapList').innerHTML=(mapsData.maps||[]).map(m=>
-      '<div style="display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">'+
-      (m.img?'<img src="/"+m.img+"" style="width:38px;height:38px;object-fit:cover;border:2px solid rgba(255,255,255,.14)">':'')+
-      '<div style="flex:1"><b>'+esc(m.name)+'</b> · '+esc(m.price||'')+(m.isNew?' <span style="color:#ff6b7f">(NEW)</span>':'')+(m.role?' <span style="color:#8ea6cc">ยศ: '+esc(m.role)+'</span>':'')+'</div>'+
-      '<button class="btn mini" data-medit="'+m.id+'">แก้</button>'+
-      '<button class="btn mini" data-mdel="'+m.id+'" style="border-color:rgba(255,107,127,.45)">ลบ</button></div>').join('')||'<p style="color:#8ea6cc;font-size:12px;margin-top:8px">ยังไม่มีแมพ</p>';
-  }
-  $('mapList').addEventListener('click',async e=>{
-    const ed=e.target.dataset.medit,del=e.target.dataset.mdel;
-    if(ed){const m=(mapsData.maps||[]).find(x=>x.id===ed);if(m){$('mpId').value=m.id;$('mpId').disabled=true;$('mpName').value=m.name||'';$('mpPrice').value=m.price||'';$('mpImg').value=m.img||'';$('mpEmoji').value=m.emoji||'';$('mpRole').value=m.role||'';$('mpNew').checked=!!m.isNew;$('mpEditId').value=m.id;$('mpName').scrollIntoView({behavior:'smooth'});}}
-    if(del&&confirm('ลบแมพนี้?')){try{await call('/api/maps/delete',{id:del});loadMaps();}catch(err){$('mpMsg').style.color='#ff6b7f';$('mpMsg').textContent=err.message;}}
-  });
-  $('mpSave').addEventListener('click',async()=>{
-    const id=$('mpEditId').value||$('mpId').value.trim();
-    if(!id){$('mpMsg').style.color='#ff6b7f';$('mpMsg').textContent='ต้องใส่ ID แมพ';return;}
-    const map={name:$('mpName').value.trim(),price:$('mpPrice').value.trim(),img:$('mpImg').value.trim(),emoji:$('mpEmoji').value.trim(),role:$('mpRole').value.trim(),isNew:$('mpNew').checked,overlays:[],downloads:[],commands:[]};
-    // ถ้าแก้ ให้เก่าของเดิมไว้
-    const old=(mapsData.maps||[]).find(m=>m.id===id);
-    if(old){map.overlays=old.overlays||[];map.downloads=old.downloads||[];map.commands=old.commands||[];}
-    try{await call('/api/maps/save',{id,map});$('mpMsg').style.color='#3ddc97';$('mpMsg').textContent='✅ บันทึกแล้ว';clearMapForm();loadMaps();}catch(e){$('mpMsg').style.color='#ff6b7f';$('mpMsg').textContent=e.message;}
-  });
-  function clearMapForm(){$('mpId').value='';$('mpId').disabled=false;$('mpName').value='';$('mpPrice').value='';$('mpImg').value='';$('mpEmoji').value='';$('mpRole').value='';$('mpNew').checked=false;$('mpEditId').value='';}
-  $('mpClear').addEventListener('click',clearMapForm);
-  $('mapDiscordCh').addEventListener('change',async()=>{
-    try{mapsData.buyDiscordChannel=$('mapDiscordCh').value.trim();await call('/api/maps',{maps:mapsData.maps,buyDiscordGuild:mapsData.buyDiscordGuild,buyDiscordChannel:mapsData.buyDiscordChannel});}catch(e){}
-  });
-  $('mapDiscordGuild').addEventListener('change',async()=>{
-    try{mapsData.buyDiscordGuild=$('mapDiscordGuild').value.trim();await call('/api/maps',{maps:mapsData.maps,buyDiscordGuild:mapsData.buyDiscordGuild,buyDiscordChannel:mapsData.buyDiscordChannel});}catch(e){}
-  });
-</script></body></html>`;
+/* หน้าแอดมินจัดการสมาชิก — แยกเป็นไฟล์ panel.html (แก้ง่าย) แล้วบีบอัด gzip ไว้ตั้งแต่เปิดเซิร์ฟเวอร์ */
+const PANEL_HTML = fs.readFileSync(require('path').join(__dirname, 'panel.html'), 'utf8');
+const PANEL_GZ = require('zlib').gzipSync(PANEL_HTML);
 
 /** อ่าน body ดิบเป็นข้อความ (ต้องใช้ตัวดิบตรวจลายเซ็น Discord) */
 function readRaw(req) {
@@ -2182,28 +1607,10 @@ async function handlePanel(pathname, data) {
   if (!D.botToken) return { code: 400, body: { error: 'ยังไม่ได้ตั้งบอท (DISCORD_BOT_TOKEN)' } };
 
   if (pathname === '/panel/members') {
-    const [listRes, accessMap, roleExpMap] = await Promise.all([
-      botListMembers(),
-      STORE_ENABLED ? getAccessMap() : {},
-      STORE_ENABLED ? getRoleExpMap() : {},
-    ]);
+    if (data.fresh) dcCache.delete('members:all');   // ปุ่มรีเฟรช = ดึงจากดิสคอร์ดใหม่จริง
+    const [listRes, maps] = await Promise.all([botListMembers(), panelLoadMaps(!!data.fresh)]);
     const list = listRes.members || [];
-    const now = Date.now();
-    const roleIdMap = { mc: D.mcRoleId, mooni: D.roleId, prime: D.primeRoleId, candy: D.candyRoleId, farmer: D.farmerRoleId, diamond: D.diamondRoleId, parkour: D.parkourRoleId, parkourv2: D.parkourv2RoleId, speedrun: D.speedrunRoleId };
-    const members = list.map((m) => ({
-      ...m,
-      exp: accessMap[m.uid]?.exp || 0,
-      mcExp: roleIdMap.mc ? (roleExpMap[`${m.uid}:${roleIdMap.mc}`] || 0) : 0,
-      mooniExp: roleIdMap.mooni ? (roleExpMap[`${m.uid}:${roleIdMap.mooni}`] || 0) : 0,
-      primeExp: roleIdMap.prime ? (roleExpMap[`${m.uid}:${roleIdMap.prime}`] || 0) : 0,
-      candyExp: roleIdMap.candy ? (roleExpMap[`${m.uid}:${roleIdMap.candy}`] || 0) : 0,
-      farmerExp: roleIdMap.farmer ? (roleExpMap[`${m.uid}:${roleIdMap.farmer}`] || 0) : 0,
-      diamondExp: roleIdMap.diamond ? (roleExpMap[`${m.uid}:${roleIdMap.diamond}`] || 0) : 0,
-      parkourExp: roleIdMap.parkour ? (roleExpMap[`${m.uid}:${roleIdMap.parkour}`] || 0) : 0,
-      parkourv2Exp: roleIdMap.parkourv2 ? (roleExpMap[`${m.uid}:${roleIdMap.parkourv2}`] || 0) : 0,
-      speedrunExp: roleIdMap.speedrun ? (roleExpMap[`${m.uid}:${roleIdMap.speedrun}`] || 0) : 0,
-      active: (now - (lastSeen.get(m.uid) || 0)) < ACTIVE_WINDOW,
-    }));
+    const members = list.map((m) => panelMember(m, maps));
     // เรียง: ออนไลน์ก่อน แล้วตามชื่อ
     members.sort((a, b) => (b.active - a.active) || a.name.localeCompare(b.name));
     // บอกด้วยว่าถ้ารายชื่อว่างเพราะติดต่อดิสไม่ได้ (เดิมเงียบ ทำให้ดูเหมือนข้อมูลหาย)
@@ -2214,7 +1621,7 @@ async function handlePanel(pathname, data) {
       code: 200,
       body: {
         members, discordOk: !!listRes.ok, discordCount: listRes.count || 0, warning,
-        storeCounts: { access: Object.keys(accessMap).length, roleExp: Object.keys(roleExpMap).length },
+        storeCounts: { access: Object.keys(maps.access || {}).length, roleExp: Object.keys(maps.roleExp || {}).length },
       },
     };
   }
@@ -2364,7 +1771,7 @@ async function handlePanel(pathname, data) {
     }
     // ถอดยศ = ล้างวันหมดอายุที่ตั้งไว้ด้วย (กันกวาดซ้ำ)
     if (ok && !data.on && STORE_ENABLED) await delRoleExpiry(String(data.uid), roleId);
-    return { code: ok ? 200 : 500, body: ok ? { ok: true } : { error: 'บอทกดยศไม่สำเร็จ (เช็คสิทธิ์ Manage Roles + ลำดับยศ)' } };
+    return { code: ok ? 200 : 500, body: ok ? { ok: true, member: await panelMemberOf(data.uid) } : { error: 'บอทกดยศไม่สำเร็จ (เช็คสิทธิ์ Manage Roles + ลำดับยศ)' } };
   }
 
   // ตั้ง/ล้างวันหมดอายุของยศ (หมดแล้วบอทถอดยศเองตอนกวาดทุก 5 นาที)
@@ -2389,7 +1796,7 @@ async function handlePanel(pathname, data) {
       await botSetRole(uid, roleId, true);
       await setRoleExpiry(uid, roleId, exp);
     }
-    return { code: 200, body: { ok: true } };
+    return { code: 200, body: { ok: true, member: await panelMemberOf(uid) } };
   }
 
   if (pathname === '/panel/rolebutton') {
@@ -2434,7 +1841,7 @@ async function handlePanel(pathname, data) {
     const exp = Number(data.exp) || 0;
     if (exp === 0) await delAccess(String(data.uid));   // ถาวร = ไม่มี record
     else await setAccess(String(data.uid), { exp });
-    return { code: 200, body: { ok: true } };
+    return { code: 200, body: { ok: true, member: await panelMemberOf(data.uid) } };
   }
 
   /* ---------- จัดการร้านค้า (ใช้ตัวกลาง doShopAdmin) ---------- */
@@ -2704,8 +2111,9 @@ const server = http.createServer((req, res) => {
 
   // หน้าเว็บแอดมินจัดการสมาชิก
   if (req.method === 'GET' && url.pathname === '/panel') {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    return res.end(PANEL_HTML);
+    const gz = /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''));
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...(gz ? { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' } : {}) });
+    return res.end(gz ? PANEL_GZ : PANEL_HTML);
   }
   // หน้าแก้ข้อความในแอปแบบสด (hot-update) — เปิด /strings-admin ใส่รหัสแอดมิน แล้ว Save
   if (req.method === 'GET' && url.pathname === '/strings-admin') {

@@ -1,0 +1,817 @@
+<!DOCTYPE html><html lang="th"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mooni Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ===== Mooni Admin — โทนเดียวกับแอป Mooni (ดำ + ชมพู) ===== */
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg:#0b0b0f;--surface:#131318;--surface2:#1a1a21;--surface3:#24242c;
+    --line:#26262f;--edge:#33333d;--text:#f3f3f7;--muted:#8e8e9c;
+    --accent:#ff7ab8;--accent-soft:#ffb3d6;--accent-tint:rgba(255,122,184,.14);--accent-line:rgba(255,122,184,.42);
+    --green:#35d07f;--gold:#f4b73f;--red:#ff6b81;--blue:#7ab8ff;
+  }
+  html{-webkit-text-size-adjust:100%;color-scheme:dark}
+  body{min-height:100vh;color:var(--text);background:var(--bg);
+    font-family:'Anuphan','Noto Sans Thai',system-ui,'Segoe UI',sans-serif;font-size:14px;line-height:1.5}
+  button,input,select,textarea{font:inherit;color:inherit}
+  .hidden{display:none!important}
+  svg{display:block}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#2a2a33;border-radius:999px;border:2px solid var(--bg)}
+
+  /* ---------- ปุ่ม / ช่องกรอก ---------- */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:38px;padding:0 14px;
+    border-radius:10px;border:1px solid var(--line);background:var(--surface2);font-size:13px;font-weight:700;
+    cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s,transform .1s}
+  .btn:hover{background:var(--surface3);border-color:var(--edge)}
+  .btn:active{transform:translateY(1px)}
+  .btn:disabled{opacity:.55;cursor:progress}
+  .btn.primary{background:var(--accent);border-color:transparent;color:#1a0b13;box-shadow:0 8px 20px -10px rgba(255,122,184,.9)}
+  .btn.primary:hover{filter:brightness(1.06)}
+  .btn.danger{color:var(--red)}
+  .btn.danger:hover{background:rgba(255,107,129,.12);border-color:rgba(255,107,129,.4)}
+  .btn.sm{height:32px;padding:0 11px;font-size:12px;border-radius:9px}
+  .btn svg{width:15px;height:15px}
+  input,select,textarea{width:100%;height:40px;padding:0 12px;border-radius:10px;border:1px solid var(--line);
+    background:var(--surface2);font-size:13.5px;outline:none;transition:border-color .15s,box-shadow .15s}
+  textarea{height:auto;padding:10px 12px;resize:vertical;min-height:76px}
+  input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-tint)}
+  input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
+  input[type=file]{height:auto;padding:7px 8px;color:var(--muted);cursor:pointer}
+  input[type=file]::file-selector-button{margin-right:10px;padding:6px 12px;border-radius:8px;border:1px solid var(--accent-line);
+    background:var(--accent-tint);color:var(--text);font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+  label.f{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--muted);flex:1;min-width:0}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .msg{min-height:18px;font-size:12.5px}
+  .msg.ok{color:var(--green)}.msg.bad{color:var(--red)}.msg.busy{color:var(--muted)}
+
+  /* ---------- เข้าสู่ระบบ ---------- */
+  #login{min-height:100vh;display:grid;place-items:center;padding:24px;
+    background:radial-gradient(700px 420px at 20% 0%,rgba(255,122,184,.16),transparent 70%),radial-gradient(600px 400px at 100% 100%,rgba(122,92,255,.14),transparent 70%),var(--bg)}
+  .lcard{width:min(380px,100%);padding:28px 26px 24px;border-radius:22px;background:var(--surface);
+    border:1px solid rgba(255,122,184,.22);box-shadow:0 30px 70px -30px rgba(0,0,0,.9);display:flex;flex-direction:column;gap:14px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:46px;height:46px;flex:none;border-radius:14px;display:grid;place-items:center;color:#fff;
+    background:linear-gradient(140deg,#ffb3d6,#ff7ab8 55%,#d9468d);box-shadow:0 10px 24px -10px rgba(255,122,184,.9)}
+  .logo svg{width:24px;height:24px}
+  .brand b{display:block;font-size:17px;letter-spacing:1.2px}
+  .brand b em{font-style:normal;color:var(--accent)}
+  .brand span{display:block;font-size:10.5px;letter-spacing:2px;color:var(--muted);font-weight:700}
+  .lcard p{font-size:12.5px;color:var(--muted)}
+  .lcard .btn{height:44px;font-size:14px}
+
+  /* ---------- โครงหน้า ---------- */
+  .top{position:sticky;top:0;z-index:30;background:rgba(11,11,15,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .top-in{max-width:1240px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  .tabs{display:flex;gap:4px;padding:4px;border-radius:12px;background:var(--surface);border:1px solid var(--line);flex-wrap:wrap}
+  .tabs button{display:flex;align-items:center;gap:7px;height:34px;padding:0 14px;border:0;border-radius:9px;background:transparent;
+    color:var(--muted);font-size:13px;font-weight:700;cursor:pointer;transition:background .15s,color .15s}
+  .tabs button svg{width:15px;height:15px}
+  .tabs button:hover{color:var(--text);background:var(--surface2)}
+  .tabs button.on{background:var(--accent-tint);color:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent-line)}
+  .top .sp{flex:1}
+  main{max-width:1240px;margin:0 auto;padding:22px 20px 60px}
+  .pane{display:none}.pane.on{display:block;animation:fade .2s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}}
+  .ph{display:flex;align-items:flex-end;gap:14px;margin-bottom:16px;flex-wrap:wrap}
+  .ph h1{font-size:24px;line-height:1.2}
+  .ph p{font-size:13px;color:var(--muted);margin-top:3px}
+  .ph .sp{flex:1}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 20px}
+  .card+.card{margin-top:14px}
+  .ch{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .ch .ic{width:34px;height:34px;flex:none;border-radius:10px;display:grid;place-items:center;background:var(--accent-tint);color:var(--accent)}
+  .ch .ic svg{width:17px;height:17px}
+  .ch b{display:block;font-size:15px}
+  .ch span{display:block;font-size:12px;color:var(--muted)}
+  .ch .sp{flex:1}
+  .stack{display:flex;flex-direction:column;gap:12px}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;align-items:start}
+  .grid2 .card+.card{margin-top:0}
+  hr.sep{border:0;border-top:1px dashed var(--line);margin:4px 0}
+
+  /* ---------- สถิติ ---------- */
+  .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
+  .stat{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;cursor:pointer;transition:border-color .15s}
+  .stat:hover,.stat.on{border-color:var(--accent-line)}
+  .stat span{display:block;font-size:12px;color:var(--muted);font-weight:600}
+  .stat b{display:block;font-size:26px;font-weight:800;line-height:1.2;margin-top:4px;font-variant-numeric:tabular-nums}
+  .stat.g b{color:var(--green)}.stat.y b{color:var(--gold)}.stat.r b{color:var(--red)}
+
+  /* ---------- แถบค้นหา + ตัวกรอง ---------- */
+  .tool{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .search{position:relative;flex:1;min-width:220px}
+  .search svg{position:absolute;left:12px;top:12px;width:16px;height:16px;color:var(--muted)}
+  .search input{padding-left:38px}
+  .chips{display:flex;gap:4px;padding:3px;border-radius:11px;background:var(--surface);border:1px solid var(--line);flex-wrap:wrap}
+  .chips button{height:32px;padding:0 12px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:12.5px;font-weight:700;cursor:pointer}
+  .chips button:hover{color:var(--text)}
+  .chips button.on{background:var(--surface3);color:var(--text);box-shadow:inset 0 -2px 0 var(--accent)}
+  select.sort{width:auto;height:38px}
+
+  .alert{padding:11px 14px;border-radius:12px;font-size:12.5px;margin-bottom:12px;line-height:1.6}
+  .alert.warn{background:rgba(244,183,63,.1);border:1px solid rgba(244,183,63,.35);color:#f6cf7a}
+  .alert.info{background:var(--surface);border:1px solid var(--line);color:var(--muted)}
+  .diag{display:flex;flex-direction:column;gap:7px}
+  .diag div{display:flex;gap:9px}
+  .diag i{font-style:normal;font-weight:700;flex:none}
+  .diag .ok{color:var(--green)}.diag .bad{color:var(--red)}
+
+  /* ---------- รายชื่อสมาชิก ---------- */
+  .list{background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+  .lhead,.mrow{display:grid;grid-template-columns:minmax(200px,1.1fr) minmax(0,2.2fr) 150px 28px;gap:14px;align-items:center;padding:0 16px}
+  .lhead{height:40px;font-size:11px;font-weight:800;letter-spacing:.6px;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--line);background:var(--surface2)}
+  .mrow{min-height:62px;padding-top:9px;padding-bottom:9px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .12s;
+    content-visibility:auto;contain-intrinsic-size:auto 64px}
+  .mrow:last-child{border-bottom:0}
+  .mrow:hover{background:var(--surface2)}
+  .mrow.flash{animation:flash .9s ease}
+  @keyframes flash{0%{background:rgba(255,122,184,.18)}100%{background:transparent}}
+  .who{display:flex;align-items:center;gap:11px;min-width:0}
+  .av{position:relative;width:38px;height:38px;flex:none}
+  .av img,.av .ph0{width:38px;height:38px;border-radius:50%;object-fit:cover;background:var(--surface3);display:grid;place-items:center;font-weight:800;color:var(--muted)}
+  .av i{position:absolute;right:-1px;bottom:-1px;width:12px;height:12px;border-radius:50%;background:#55555f;border:2.5px solid var(--surface)}
+  .av i.on{background:var(--green)}
+  .who b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .who span{display:block;font-size:11.5px;color:var(--muted)}
+  .who span.on{color:var(--green)}
+  .pills{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
+  .pill{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:700;
+    background:var(--surface3);border:1px solid var(--line);white-space:nowrap}
+  .pill em{font-style:normal;font-weight:600;color:var(--muted);font-size:10.5px}
+  .pill.perm{background:rgba(122,184,255,.12);border-color:rgba(122,184,255,.35)}
+  .pill.ok{background:rgba(53,208,127,.12);border-color:rgba(53,208,127,.35)}
+  .pill.soon{background:rgba(244,183,63,.13);border-color:rgba(244,183,63,.45)}
+  .pill.soon em{color:var(--gold)}
+  .pill.gone{background:rgba(255,107,129,.12);border-color:rgba(255,107,129,.4)}
+  .pill.gone em{color:var(--red)}
+  .pill.none{color:var(--muted);background:transparent;border-style:dashed}
+  .app{font-size:12px}
+  .chev{color:var(--muted)}
+  .chev svg{width:16px;height:16px}
+  .empty{padding:46px 16px;text-align:center;color:var(--muted)}
+  .skel{height:62px;border-bottom:1px solid var(--line);background:linear-gradient(90deg,transparent,rgba(255,255,255,.03),transparent);background-size:200% 100%;animation:sk 1.2s linear infinite}
+  @keyframes sk{from{background-position:200% 0}to{background-position:-200% 0}}
+
+  /* ---------- ลิ้นชักตั้งค่าสมาชิก ---------- */
+  .drawer-bg{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.55);backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .2s}
+  .drawer-bg.on{opacity:1;pointer-events:auto}
+  .drawer{position:fixed;top:0;right:0;bottom:0;z-index:51;width:min(560px,100%);background:var(--surface);border-left:1px solid var(--line);
+    display:flex;flex-direction:column;transform:translateX(100%);transition:transform .25s cubic-bezier(.3,.9,.3,1);box-shadow:-30px 0 60px -30px rgba(0,0,0,.8)}
+  .drawer.on{transform:none}
+  .dh{display:flex;align-items:center;gap:12px;padding:18px 18px 14px;border-bottom:1px solid var(--line)}
+  .dh .av,.dh .av img,.dh .av .ph0{width:48px;height:48px}
+  .dh .who{flex:1}
+  .dh .who b{font-size:17px}
+  .x{width:36px;height:36px;flex:none;border-radius:10px;border:1px solid var(--line);background:var(--surface2);color:var(--muted);cursor:pointer;display:grid;place-items:center}
+  .x:hover{color:var(--text)}
+  .x svg{width:16px;height:16px}
+  .db{flex:1;overflow-y:auto;padding:14px 18px 24px;display:flex;flex-direction:column;gap:8px}
+  .dlab{font-size:11.5px;font-weight:800;letter-spacing:.5px;color:var(--muted);margin:8px 2px 2px}
+  .rrow{border:1px solid var(--line);border-radius:14px;background:var(--surface2);padding:11px 12px;display:flex;flex-direction:column;gap:9px;transition:border-color .15s}
+  .rrow.has{border-color:rgba(255,122,184,.28)}
+  .rtop{display:flex;align-items:center;gap:12px}
+  .rtop .nm{flex:1;min-width:0}
+  .rtop .nm b{display:block;font-size:13.5px}
+  .rtop .nm span{display:block;font-size:12px;color:var(--muted)}
+  .rtop .nm span.ok{color:var(--green)}.rtop .nm span.perm{color:var(--blue)}.rtop .nm span.soon{color:var(--gold)}.rtop .nm span.gone{color:var(--red)}
+  .sw{position:relative;width:44px;height:24px;flex:none;border-radius:999px;border:0;background:var(--surface3);cursor:pointer;transition:background .22s}
+  .sw i{position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#9b9ba8;transition:transform .26s cubic-bezier(.3,1.35,.5,1),background .2s}
+  .sw.on{background:var(--accent)}
+  .sw.on i{transform:translateX(20px);background:#fff}
+  .sw.busy{opacity:.5;pointer-events:none}
+  .rmore{width:30px;height:30px;flex:none;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;display:grid;place-items:center;transition:transform .2s}
+  .rmore svg{width:14px;height:14px}
+  .rrow.open .rmore{transform:rotate(180deg);color:var(--accent)}
+  .rbody{display:none;flex-direction:column;gap:8px}
+  .rrow.open .rbody{display:flex}
+  .qk{display:flex;flex-wrap:wrap;gap:6px}
+  .qk button{height:30px;padding:0 11px;border-radius:8px;border:1px solid var(--line);background:var(--surface);font-size:12px;font-weight:700;cursor:pointer}
+  .qk button:hover{border-color:var(--accent-line);background:var(--accent-tint)}
+  .qk button.del{color:var(--red)}
+  .qk button.del:hover{background:rgba(255,107,129,.12);border-color:rgba(255,107,129,.4)}
+  .cust{display:flex;gap:6px;align-items:center}
+  .cust input{width:80px;height:32px}
+  .cust select{width:auto;height:32px}
+  .cust .btn{height:32px}
+  .df{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;font-size:11.5px;color:var(--muted);align-items:center}
+
+  /* ---------- รายการ (สินค้า / แมพ) ---------- */
+  .items{display:flex;flex-direction:column;gap:8px}
+  .it{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px;background:var(--surface2);border:1px solid var(--line)}
+  .it img,.it .ph0{width:44px;height:44px;flex:none;border-radius:10px;object-fit:cover;background:var(--surface3);display:grid;place-items:center;font-size:20px}
+  .it .nm{flex:1;min-width:0}
+  .it .nm b{display:block;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .it .nm span{display:block;font-size:12px;color:var(--muted)}
+  .tag{display:inline-block;padding:0 7px;border-radius:999px;font-size:10.5px;font-weight:800;background:var(--surface3);color:var(--muted);margin-left:6px}
+  .tag.r{background:rgba(255,107,129,.14);color:var(--red)}
+  .tag.p{background:var(--accent-tint);color:var(--accent-soft)}
+
+  .toast{position:fixed;left:50%;bottom:24px;z-index:80;padding:11px 18px;border-radius:12px;font-size:13px;font-weight:700;
+    background:#1d1d25;border:1px solid var(--accent-line);opacity:0;pointer-events:none;transform:translate(-50%,14px);transition:.22s}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+  .toast.bad{border-color:rgba(255,107,129,.6)}
+  .spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--surface3);border-top-color:var(--accent);animation:rot .7s linear infinite;display:inline-block}
+  @keyframes rot{to{transform:rotate(360deg)}}
+
+  @media(max-width:860px){
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .lhead{display:none}
+    .mrow{grid-template-columns:1fr 24px}
+    .mrow .pills{grid-column:1/-1;grid-row:2}
+    .mrow .app{display:none}
+    .grid2{grid-template-columns:1fr}
+  }
+</style></head><body>
+
+<!-- ===== เข้าสู่ระบบ ===== -->
+<div id="login">
+  <form class="lcard" id="loginForm">
+    <div class="brand">
+      <span class="logo"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></span>
+      <div><b>MOONI <em>ADMIN</em></b><span>จัดการสมาชิก · ร้านค้า · แมพ</span></div>
+    </div>
+    <p>ใส่รหัสแอดมิน (ADMIN_KEY ที่ตั้งใน Render) — ระบบไม่จำรหัสไว้ในเบราว์เซอร์</p>
+    <input id="key" type="password" placeholder="รหัสแอดมิน" autocomplete="current-password">
+    <button class="btn primary" id="enter" type="submit">เข้าสู่ระบบ</button>
+    <div class="msg bad" id="lmsg"></div>
+  </form>
+</div>
+
+<!-- ===== แผงจัดการ ===== -->
+<div class="hidden" id="panel">
+  <header class="top"><div class="top-in">
+    <div class="brand">
+      <span class="logo" style="width:38px;height:38px;border-radius:11px"><svg viewBox="0 0 24 24" fill="currentColor" style="width:20px;height:20px"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></span>
+      <div><b style="font-size:15px">MOONI <em>ADMIN</em></b></div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button class="on" data-tab="members"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg>สมาชิก</button>
+      <button data-tab="give"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>ปุ่ม Discord</button>
+      <button data-tab="shop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/></svg>ร้านค้า</button>
+      <button data-tab="maps"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/></svg>แมพเกม</button>
+    </nav>
+    <span class="sp"></span>
+    <button class="btn sm" id="logout" title="ออกจากระบบ">ออก</button>
+  </div></header>
+
+  <main>
+    <!-- สมาชิก -->
+    <section class="pane on" data-pane="members">
+      <div class="ph">
+        <div><h1>สมาชิก</h1><p>กดที่แถวเพื่อให้/ถอดยศและตั้งเวลา · จุดเขียว = กำลังเปิดแอปอยู่</p></div>
+        <span class="sp"></span>
+        <span class="msg busy" id="syncTxt"></span>
+        <button class="btn" id="diagBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>ตรวจระบบ</button>
+        <button class="btn" id="refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>รีเฟรช</button>
+      </div>
+      <div class="stats" id="stats">
+        <div class="stat" data-f="all"><span>สมาชิกทั้งหมด</span><b id="sAll">–</b></div>
+        <div class="stat g" data-f="online"><span>ออนไลน์ตอนนี้</span><b id="sOn">–</b></div>
+        <div class="stat" data-f="role"><span>มียศ Mooni</span><b id="sRole">–</b></div>
+        <div class="stat y" data-f="soon"><span>หมดอายุใน 3 วัน</span><b id="sSoon">–</b></div>
+      </div>
+      <div class="alert warn hidden" id="warn"></div>
+      <div class="alert info hidden" id="diag"></div>
+      <div class="tool">
+        <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input id="search" placeholder="ค้นหาชื่อ หรือ Discord ID…"></label>
+        <div class="chips" id="filters">
+          <button class="on" data-f="all">ทั้งหมด</button>
+          <button data-f="online">ออนไลน์</button>
+          <button data-f="role">มียศ</button>
+          <button data-f="norole">ไม่มียศ</button>
+          <button data-f="soon">ใกล้หมด</button>
+          <button data-f="gone">หมดอายุ</button>
+        </div>
+        <select class="sort" id="sort">
+          <option value="online">ออนไลน์ก่อน</option>
+          <option value="name">ชื่อ A–Z</option>
+          <option value="exp">ใกล้หมดอายุก่อน</option>
+          <option value="roles">ยศเยอะก่อน</option>
+        </select>
+      </div>
+      <div class="list">
+        <div class="lhead"><span>สมาชิก</span><span>ยศ</span><span>สิทธิ์ใช้แอป</span><span></span></div>
+        <div id="rows"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
+      </div>
+    </section>
+
+    <!-- ปุ่ม Discord -->
+    <section class="pane" data-pane="give">
+      <div class="ph"><div><h1>ปุ่ม Discord</h1><p>ส่งข้อความพร้อมปุ่มเข้าห้อง Discord ให้คนกดรับยศ หรือเปิด Ticket</p></div></div>
+      <div class="grid2">
+        <div class="card stack">
+          <div class="ch"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12v10H4V12M2 7h20v5H2zM12 22V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg></span><div><b>ปุ่มรับยศ</b><span>คนกดแล้วได้ยศทันที</span></div></div>
+          <div class="row">
+            <label class="f">ไอดีห้อง (คลิกขวาห้อง → Copy Channel ID)<input id="rbChannel" value="1529781693417001031"></label>
+            <label class="f">ไอดียศที่จะให้<input id="rbRole" value="1484626107721322747"></label>
+          </div>
+          <label class="f">ข้อความด้านบน<textarea id="rbText" rows="3" placeholder="เช่น กดปุ่มด้านล่างเพื่อรับยศสมาชิก 🎉"></textarea></label>
+          <div class="row">
+            <label class="f">รูปจากเครื่อง<input id="rbFile" type="file" accept="image/*"></label>
+            <label class="f">หรือลิงก์รูป<input id="rbImage" placeholder="https://..."></label>
+          </div>
+          <label class="f" style="max-width:220px">ชื่อปุ่ม<input id="rbLabel" value="รับยศ"></label>
+          <div class="row" style="align-items:center"><button class="btn primary" id="rbSend">ส่งเข้าห้อง Discord</button><div class="msg" id="rbMsg"></div></div>
+        </div>
+        <div class="card stack">
+          <div class="ch"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 0 0 6v4h20v-4a3 3 0 0 0 0-6V5H2z"/><path d="M13 5v2M13 17v2M13 11v2"/></svg></span><div><b>ปุ่มเปิด Ticket</b><span>บอท ☁️Muffin สร้างห้องคุยกับทีมงานให้</span></div></div>
+          <div class="row">
+            <label class="f">ไอดีห้องที่จะวางปุ่ม<input id="tkChannel" value="1484627407695511582"></label>
+            <label class="f">ไอดีหมวดหมู่ที่จะสร้างห้อง<input id="tkCat" value="1530270907116028086"></label>
+          </div>
+          <label class="f">ไอดียศทีมงาน (หลายยศคั่นด้วย ,)<input id="tkRole" value="1484626455928373279,1484626578943246518"></label>
+          <label class="f">ข้อความด้านบน<textarea id="tkText" rows="3" placeholder="เช่น มีปัญหาหรือต้องการติดต่อทีมงาน กดปุ่มด้านล่างได้เลย 🎫"></textarea></label>
+          <div class="row">
+            <label class="f">รูปจากเครื่อง<input id="tkFile" type="file" accept="image/*"></label>
+            <label class="f">หรือลิงก์รูป<input id="tkImage" placeholder="https://..."></label>
+          </div>
+          <label class="f" style="max-width:220px">ชื่อปุ่ม<input id="tkLabel" value="🎫 เปิด Ticket"></label>
+          <div class="row" style="align-items:center"><button class="btn primary" id="tkSend">ส่งเข้าห้อง Discord</button><div class="msg" id="tkMsg"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ร้านค้า -->
+    <section class="pane" data-pane="shop">
+      <div class="ph"><div><h1>ร้านค้า</h1><p>ตั้งค่าหน้าร้านและสินค้า</p></div><span class="sp"></span><a class="btn" href="/shop" target="_blank">เปิดหน้าร้าน ↗</a></div>
+      <div class="grid2">
+        <div class="card stack">
+          <div class="ch"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.8 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3.1 14H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span><div><b>ตั้งค่าร้าน</b><span>ชื่อร้าน ช่องทางรับเงิน ห้องรับออเดอร์</span></div></div>
+          <div class="row">
+            <label class="f">ชื่อร้าน<input id="shName" placeholder="Mooni Shop"></label>
+            <label class="f">ห้องรับออเดอร์ (Channel ID)<input id="shChannel" placeholder="ไอดีห้องแอดมิน"></label>
+          </div>
+          <label class="f">คำโปรยใต้ชื่อร้าน<input id="shNote" placeholder="โอนแล้วแนบสลิป รออนุมัติ"></label>
+          <div class="row">
+            <label class="f">เบอร์ / พร้อมเพย์<input id="shPayNum" placeholder="0812345678"></label>
+            <label class="f">ชื่อบัญชี<input id="shPayName" placeholder="ชื่อ นามสกุล"></label>
+          </div>
+          <label class="f">รูป QR (ไม่ใส่ก็ได้)<input id="shQr" type="file" accept="image/*"></label>
+          <div class="row" style="align-items:center"><button class="btn primary" id="shSaveSettings">บันทึกตั้งค่าร้าน</button><div class="msg" id="shSetMsg"></div></div>
+        </div>
+        <div class="card stack">
+          <div class="ch"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span><div><b id="pFormTitle">เพิ่มสินค้า</b><span>กด "แก้" ที่สินค้าด้านล่างเพื่อแก้ไข</span></div></div>
+          <label class="f">ชื่อสินค้า<input id="pName" placeholder="เช่น ยศ VIP"></label>
+          <div class="row">
+            <label class="f">ราคา 30 วัน (บาท)<input id="pPrice30" type="number" min="0" value="0"></label>
+            <label class="f">ราคา 90 วัน (บาท)<input id="pPrice90" type="number" min="0" value="0"></label>
+          </div>
+          <label class="f">รายละเอียด<textarea id="pDesc" rows="2" placeholder="อธิบายสินค้า"></textarea></label>
+          <div class="row">
+            <label class="f">ไอดียศที่จะได้<input id="pRole" value="1529344448817791016"></label>
+            <label class="f">รูปสินค้า<input id="pImg" type="file" accept="image/*"></label>
+          </div>
+          <input type="hidden" id="pId">
+          <div class="row" style="align-items:center"><button class="btn primary" id="pSave">บันทึกสินค้า</button><button class="btn" id="pClear">ล้างฟอร์ม</button><div class="msg" id="pMsg2"></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ch"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></span><div><b>สินค้าทั้งหมด</b><span id="pCount"></span></div></div>
+        <div class="items" id="pList"></div>
+      </div>
+    </section>
+
+    <!-- แมพ -->
+    <section class="pane" data-pane="maps">
+      <div class="ph"><div><h1>แมพเกม</h1><p>แก้ชื่อ ราคา รูป และปุ่มซื้อของการ์ดแมพในแอป — มีผลทันทีไม่ต้องอัปเดตแอป</p></div></div>
+      <div class="grid2">
+        <div class="card stack">
+          <div class="ch"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></span><div><b>แมพทั้งหมด</b><span>เรียงตามที่โชว์ในแอป</span></div></div>
+          <div class="items" id="mapList"></div>
+          <hr class="sep">
+          <div class="row">
+            <label class="f">Discord Guild ID (ปุ่ม BUY)<input id="mapDiscordGuild" placeholder="Guild ID"></label>
+            <label class="f">Discord Channel ID (ปุ่ม BUY)<input id="mapDiscordCh" placeholder="1484627407695511582"></label>
+          </div>
+          <div class="msg" id="mapBuyMsg"></div>
+        </div>
+        <div class="card stack">
+          <div class="ch"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span><div><b id="mpFormTitle">เพิ่มแมพ</b><span>กด "แก้" ที่แมพด้านซ้ายเพื่อแก้ไข</span></div></div>
+          <div class="row">
+            <label class="f">ID แมพ<input id="mpId" placeholder="เช่น farmer"></label>
+            <label class="f">ชื่อแมพ<input id="mpName" placeholder="เช่น Mooni Farm"></label>
+          </div>
+          <div class="row">
+            <label class="f">ราคา<input id="mpPrice" placeholder="เช่น 219฿"></label>
+            <label class="f">รูปแมพ (ไฟล์ในแอป)<input id="mpImg" placeholder="เช่น farmer-card.png"></label>
+          </div>
+          <div class="row">
+            <label class="f">Emoji<input id="mpEmoji" placeholder="เช่น 🌾"></label>
+            <label class="f">ยศที่ต้องมี<input id="mpRole" placeholder="เช่น farmer"></label>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700"><input type="checkbox" id="mpNew"> แสดงป้าย NEW</label>
+          <input type="hidden" id="mpEditId">
+          <div class="row" style="align-items:center"><button class="btn primary" id="mpSave">บันทึกแมพ</button><button class="btn" id="mpClear">ล้างฟอร์ม</button><div class="msg" id="mpMsg"></div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="drawer-bg" id="dbg"></div>
+  <aside class="drawer" id="drawer"></aside>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let KEY = '';          // ไม่จำรหัสไว้ในเบราว์เซอร์ — ต้องใส่รหัสเองทุกครั้ง
+  let members = [];
+  let filter = 'all';
+  let cur = null;        // uid ที่เปิดลิ้นชักอยู่
+  const open = new Set(); // แถวยศที่กางไว้ในลิ้นชัก
+
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const DAY = 86400000;
+
+  async function call(path, body) {
+    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: KEY, ...body }) });
+    if (r.status === 401) throw new Error('รหัสแอดมินไม่ถูกต้อง');
+    let d = null; try { d = await r.json(); } catch {}
+    if (!r.ok) throw new Error((d && d.error) || ('ผิดพลาด ' + r.status));
+    return d || {};
+  }
+  let toastT;
+  function toast(msg, ok = true) {
+    const t = $('toast'); t.textContent = msg; t.className = 'toast show' + (ok ? '' : ' bad');
+    clearTimeout(toastT); toastT = setTimeout(() => { t.className = 'toast'; }, 2400);
+  }
+  function setMsg(id, kind, text) { const m = $(id); m.className = 'msg ' + kind; m.textContent = text; }
+
+  /* ---------- ยศ ---------- */
+  const ROLES = [
+    { id: 'mooni', name: 'Mooni', emoji: '🌙', flag: 'mooni', exp: 'mooniExp' },
+    { id: 'prime', name: 'Pro', emoji: '⚡', flag: 'prime', exp: 'primeExp' },
+    { id: 'mc', name: 'Minecraft', emoji: '⛏️', flag: 'mc', exp: 'mcExp' },
+    { id: 'candy', name: 'Candy Block', emoji: '🍬', flag: 'candy', exp: 'candyExp' },
+    { id: 'farmer', name: 'Farmer', emoji: '🌾', flag: 'farmer', exp: 'farmerExp' },
+    { id: 'diamond', name: 'Diamond', emoji: '💎', flag: 'diamond', exp: 'diamondExp' },
+    { id: 'parkour', name: 'Parkour', emoji: '🏃', flag: 'parkour', exp: 'parkourExp' },
+    { id: 'parkourv2', name: 'Parkour V2', emoji: '🏃', flag: 'parkourv2', exp: 'parkourv2Exp' },
+    { id: 'speedrun', name: 'Diamond Speedrun', emoji: '⛏️', flag: 'speedrun', exp: 'speedrunExp' },
+  ];
+  /** สถานะเวลา: perm / ok / soon (≤3 วัน) / gone + ข้อความ */
+  function expInfo(exp) {
+    if (!exp) return { cls: 'perm', short: 'ถาวร', long: 'ถาวร' };
+    const left = exp - Date.now();
+    if (left <= 0) return { cls: 'gone', short: 'หมดอายุ', long: 'หมดอายุแล้ว' };
+    const d = Math.floor(left / DAY), h = Math.floor(left % DAY / 3600000), m = Math.floor(left % 3600000 / 60000);
+    const txt = d > 0 ? d + ' วัน ' + h + ' ชม.' : h > 0 ? h + ' ชม. ' + m + ' นาที' : m + ' นาที';
+    const date = new Date(exp).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    return { cls: left < 3 * DAY ? 'soon' : 'ok', short: txt, long: 'เหลือ ' + txt + ' · ถึง ' + date };
+  }
+  const rolesOf = (m) => ROLES.filter((r) => m[r.flag]);
+  /** วันหมดอายุที่ใกล้ที่สุดของคนนี้ (ยศ + แอป) — ใช้กรอง/เรียง */
+  function nearestExp(m) {
+    const all = rolesOf(m).map((r) => m[r.exp]).concat(m.exp ? [m.exp] : []).filter(Boolean);
+    return all.length ? Math.min(...all) : Infinity;
+  }
+
+  /* ---------- แถวสมาชิก ---------- */
+  const avatar = (m, cls = '') => '<span class="av ' + cls + '">' +
+    (m.avatar ? '<img src="' + esc(m.avatar) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">' : '<span class="ph0">' + esc((m.name || '?').trim().charAt(0).toUpperCase()) + '</span>') +
+    '<i class="' + (m.active ? 'on' : '') + '"></i></span>';
+  function rowHTML(m) {
+    const rs = rolesOf(m);
+    const pills = rs.map((r) => { const e = expInfo(m[r.exp]); return '<span class="pill ' + e.cls + '">' + r.emoji + ' ' + esc(r.name) + '<em>' + e.short + '</em></span>'; }).join('')
+      || '<span class="pill none">ยังไม่มียศ</span>';
+    const a = expInfo(m.exp);
+    return '<div class="mrow" data-uid="' + m.uid + '">' +
+      '<div class="who">' + avatar(m) + '<div style="min-width:0"><b>' + esc(m.name) + '</b><span class="' + (m.active ? 'on' : '') + '">' + (m.active ? 'ออนไลน์' : 'ออฟไลน์') + '</span></div></div>' +
+      '<div class="pills">' + pills + '</div>' +
+      '<div class="app"><span class="pill ' + a.cls + '">📱 แอป<em>' + a.short + '</em></span></div>' +
+      '<span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></svg></span></div>';
+  }
+  function matches(m) {
+    const q = $('search').value.trim().toLowerCase();
+    if (q && !(String(m.name).toLowerCase().includes(q) || String(m.uid).includes(q))) return false;
+    const n = nearestExp(m);
+    switch (filter) {
+      case 'online': return m.active;
+      case 'role': return rolesOf(m).length > 0;
+      case 'norole': return rolesOf(m).length === 0;
+      case 'soon': return n !== Infinity && n > Date.now() && n - Date.now() < 3 * DAY;
+      case 'gone': return n !== Infinity && n <= Date.now();
+      default: return true;
+    }
+  }
+  function sorted(list) {
+    const s = $('sort').value;
+    const byName = (a, b) => String(a.name).localeCompare(String(b.name), 'th');
+    if (s === 'name') return list.sort(byName);
+    if (s === 'exp') return list.sort((a, b) => (nearestExp(a) - nearestExp(b)) || byName(a, b));
+    if (s === 'roles') return list.sort((a, b) => (rolesOf(b).length - rolesOf(a).length) || byName(a, b));
+    return list.sort((a, b) => (b.active - a.active) || byName(a, b));
+  }
+  let renderRaf = 0;
+  function render() {
+    cancelAnimationFrame(renderRaf);
+    renderRaf = requestAnimationFrame(() => {
+      const list = sorted(members.filter(matches));
+      $('rows').innerHTML = list.map(rowHTML).join('') || '<div class="empty">ไม่พบสมาชิกตามเงื่อนไขนี้</div>';
+      const now = Date.now();
+      $('sAll').textContent = members.length;
+      $('sOn').textContent = members.filter((m) => m.active).length;
+      $('sRole').textContent = members.filter((m) => m.mooni).length;
+      $('sSoon').textContent = members.filter((m) => { const n = nearestExp(m); return n !== Infinity && n > now && n - now < 3 * DAY; }).length;
+      document.querySelectorAll('.stat').forEach((s) => s.classList.toggle('on', s.dataset.f === filter && filter !== 'all'));
+    });
+  }
+  /** แก้แค่แถวเดียว (หลังกดปุ่มในลิ้นชัก) — ไม่วาดใหม่ทั้งรายการ */
+  function patchMember(m) {
+    if (!m) return;
+    const i = members.findIndex((x) => x.uid === m.uid);
+    if (i >= 0) members[i] = m; else members.push(m);
+    const row = document.querySelector('.mrow[data-uid="' + m.uid + '"]');
+    if (row) {
+      const t = document.createElement('div'); t.innerHTML = rowHTML(m);
+      const nr = t.firstChild; nr.classList.add('flash'); row.replaceWith(nr);
+    }
+    if (cur === m.uid) drawDrawer();
+  }
+
+  /* ---------- โหลดรายชื่อ ---------- */
+  let loading = false;
+  async function load(fresh = false, quiet = false) {
+    if (loading) return; loading = true;
+    if (!quiet) $('syncTxt').innerHTML = '<span class="spin"></span> กำลังโหลด…';
+    try {
+      const d = await call('/panel/members', fresh ? { fresh: true } : {});
+      members = d.members || [];
+      const w = $('warn');
+      let txt = d.warning ? '⚠️ ' + d.warning : '';
+      w.textContent = txt; w.classList.toggle('hidden', !txt);
+      render();
+      if (cur) drawDrawer();
+      $('syncTxt').textContent = 'อัปเดต ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch (e) { $('syncTxt').textContent = ''; toast(e.message, false); }
+    finally { loading = false; }
+  }
+
+  /* ---------- ลิ้นชักตั้งค่าสมาชิก ---------- */
+  const QUICK = [['+1 วัน', DAY], ['+7 วัน', 7 * DAY], ['+30 วัน', 30 * DAY], ['+90 วัน', 90 * DAY]];
+  function roleRow(id, title, has, exp, isApp) {
+    const e = expInfo(exp);
+    const status = isApp ? e.long : (has ? e.long : 'ยังไม่มียศ');
+    const cls = (isApp || has) ? e.cls : '';
+    return '<div class="rrow' + (has ? ' has' : '') + (open.has(id) ? ' open' : '') + '" data-role="' + id + '">' +
+      '<div class="rtop">' +
+        (isApp ? '<span style="width:44px;text-align:center;font-size:18px">📱</span>' : '<button class="sw' + (has ? ' on' : '') + '" data-act="toggle" title="' + (has ? 'ถอดยศ' : 'ให้ยศ (ถาวร)') + '"><i></i></button>') +
+        '<div class="nm"><b>' + title + '</b><span class="' + cls + '">' + status + '</span></div>' +
+        '<button class="rmore" data-act="more" title="ตั้งเวลา"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></button>' +
+      '</div>' +
+      '<div class="rbody">' +
+        '<div class="qk">' + QUICK.map(([l, ms]) => '<button data-act="add" data-ms="' + ms + '">' + l + '</button>').join('') +
+          '<button data-act="set" data-ms="0">♾ ถาวร</button>' +
+          ((isApp || has) ? '<button class="del" data-act="del">' + (isApp ? 'ตัดสิทธิ์' : 'ถอดยศ') + '</button>' : '') + '</div>' +
+        '<div class="cust"><span style="font-size:12px;color:var(--muted)">กำหนดเอง</span><input type="number" class="cnum" min="1" value="3">' +
+          '<select class="cunit"><option value="60">นาที</option><option value="3600">ชั่วโมง</option><option value="86400" selected>วัน</option><option value="2592000">เดือน</option></select>' +
+          '<button class="btn sm primary" data-act="custom">ตั้ง</button></div>' +
+        '<span style="font-size:11.5px;color:var(--muted)">+วัน = ต่อจากเวลาที่เหลืออยู่ (หมดแล้ว/ถาวร = นับจากตอนนี้)</span>' +
+      '</div></div>';
+  }
+  function drawDrawer() {
+    const m = members.find((x) => x.uid === cur);
+    if (!m) return closeDrawer();
+    $('drawer').innerHTML =
+      '<div class="dh">' + avatar(m) + '<div class="who"><div style="min-width:0"><b>' + esc(m.name) + '</b><span class="' + (m.active ? 'on' : '') + '">' + (m.active ? 'ออนไลน์ · กำลังเปิดแอป' : 'ออฟไลน์') + ' · ID ' + esc(m.uid) + '</span></div></div>' +
+      '<button class="x" data-act="close" title="ปิด (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>' +
+      '<div class="db">' +
+        '<div class="dlab">สิทธิ์ใช้แอป</div>' + roleRow('app', 'สิทธิ์ใช้แอป Mooni', true, m.exp, true) +
+        '<div class="dlab">ยศ Discord</div>' + ROLES.map((r) => roleRow(r.id, r.emoji + ' ' + esc(r.name), !!m[r.flag], m[r.exp], false)).join('') +
+      '</div>' +
+      '<div class="df">สวิตช์ = ให้/ถอดยศทันที · กดลูกศรเพื่อตั้งเวลา (บอทถอดยศเองเมื่อหมดเวลา)</div>';
+  }
+  function openDrawer(uid) {
+    cur = uid; open.clear(); drawDrawer();
+    $('drawer').classList.add('on'); $('dbg').classList.add('on');
+  }
+  function closeDrawer() {
+    cur = null; $('drawer').classList.remove('on'); $('dbg').classList.remove('on');
+  }
+  $('rows').addEventListener('click', (e) => { const r = e.target.closest('.mrow'); if (r) openDrawer(r.dataset.uid); });
+  $('dbg').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && cur) closeDrawer(); });
+
+  $('drawer').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-act]'); if (!b) return;
+    const act = b.dataset.act;
+    if (act === 'close') return closeDrawer();
+    const row = b.closest('.rrow'); if (!row) return;
+    const role = row.dataset.role, isApp = role === 'app';
+    if (act === 'more') { row.classList.toggle('open'); open[row.classList.contains('open') ? 'add' : 'delete'](role); return; }
+    const m = members.find((x) => x.uid === cur); if (!m) return;
+    const r = ROLES.find((x) => x.id === role);
+    const curExp = isApp ? m.exp : m[r.exp];
+    const has = isApp ? true : !!m[r.flag];
+    let exp;
+    if (act === 'toggle') {
+      b.classList.add('busy');
+      try {
+        const on = !m[r.flag];
+        const d = await call('/panel/role', { uid: m.uid, role, on });
+        if (d.member) patchMember(d.member); else { m[r.flag] = on; if (!on) m[r.exp] = 0; patchMember({ ...m }); }
+        toast(on ? 'ให้ยศ ' + r.name + ' แล้ว' : 'ถอดยศ ' + r.name + ' แล้ว');
+      } catch (err) { toast(err.message, false); b.classList.remove('busy'); }
+      return;
+    }
+    if (act === 'add') {
+      const ms = Number(b.dataset.ms);
+      const base = has && curExp && curExp > Date.now() ? curExp : Date.now();
+      exp = base + ms;
+    } else if (act === 'set') exp = Number(b.dataset.ms) === 0 ? 0 : Date.now() + Number(b.dataset.ms);
+    else if (act === 'del') {
+      if (!confirm(isApp ? 'ตัดสิทธิ์ใช้แอปของ ' + m.name + ' ทันที?' : 'ถอดยศ ' + r.name + ' ของ ' + m.name + ' ทันที?')) return;
+      exp = Date.now() - 1000;
+    } else if (act === 'custom') {
+      const n = Number(row.querySelector('.cnum').value) || 0;
+      const unit = Number(row.querySelector('.cunit').value) || 86400;
+      if (!n) return toast('ใส่จำนวนเวลาก่อน', false);
+      exp = Date.now() + n * unit * 1000;
+    } else return;
+    b.disabled = true;
+    try {
+      const d = isApp ? await call('/panel/expiry', { uid: m.uid, exp }) : await call('/panel/roleexpiry', { uid: m.uid, role, exp });
+      if (d.member) patchMember(d.member);
+      else {
+        const n = { ...m };
+        if (isApp) n.exp = exp > 0 && exp < Date.now() ? exp : exp;
+        else { n[r.exp] = exp > Date.now() ? exp : 0; n[r.flag] = !(exp && exp <= Date.now()); }
+        patchMember(n);
+      }
+      toast(exp === 0 ? 'ตั้งเป็นถาวรแล้ว' : exp < Date.now() ? 'เอาออกแล้ว' : 'ตั้งเวลาแล้ว — ' + expInfo(exp).long);
+    } catch (err) { toast(err.message, false); }
+    finally { b.disabled = false; }
+  });
+
+  /* ---------- ค้นหา / กรอง / เรียง ---------- */
+  let searchT;
+  $('search').addEventListener('input', () => { clearTimeout(searchT); searchT = setTimeout(render, 120); });
+  $('sort').addEventListener('change', render);
+  function setFilter(f) {
+    filter = f;
+    document.querySelectorAll('#filters button').forEach((b) => b.classList.toggle('on', b.dataset.f === f));
+    render();
+  }
+  $('filters').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setFilter(b.dataset.f); });
+  $('stats').addEventListener('click', (e) => { const s = e.target.closest('.stat'); if (s) setFilter(filter === s.dataset.f ? 'all' : s.dataset.f); });
+  $('refresh').addEventListener('click', () => load(true));
+
+  /* ---------- ตรวจระบบ ---------- */
+  $('diagBtn').addEventListener('click', async () => {
+    const box = $('diag'); box.classList.remove('hidden'); box.innerHTML = '<span class="spin"></span> กำลังตรวจ…';
+    try {
+      const d = await call('/panel/diag', { ticketChannel: $('tkChannel').value.trim(), ticketCategory: $('tkCat').value.trim() });
+      box.innerHTML = '<div class="diag"><b style="color:var(--text)">ผลตรวจระบบ</b>' + (d.checks || []).map((c) =>
+        '<div><i class="' + (c.ok ? 'ok' : 'bad') + '">' + (c.ok ? '✓' : '✕') + ' ' + esc(c.label) + '</i><span>' + esc(c.msg || '') + '</span></div>').join('') + '</div>';
+    } catch (e) { box.innerHTML = '<div class="diag"><i class="bad">✕ ตรวจไม่ได้: ' + esc(e.message) + '</i></div>'; }
+  });
+
+  /* ---------- แท็บ ---------- */
+  $('tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-tab]'); if (!b) return;
+    document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('on', x === b));
+    document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === b.dataset.tab));
+    if (b.dataset.tab === 'shop' && !shopLoaded) loadShop();
+    if (b.dataset.tab === 'maps' && !mapsLoaded) loadMaps();
+  });
+
+  /* ---------- ปุ่ม Discord ---------- */
+  async function readImg(input) {
+    const f = input.files[0]; if (!f) return {};
+    if (f.size > 8 * 1024 * 1024) throw new Error('รูปใหญ่เกิน 8MB');
+    const imageData = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = () => rej(new Error('อ่านไฟล์ไม่ได้')); fr.readAsDataURL(f); });
+    return { imageData, imageName: f.name };
+  }
+  $('rbSend').addEventListener('click', async () => {
+    const b = $('rbSend'); b.disabled = true; setMsg('rbMsg', 'busy', 'กำลังส่ง…');
+    try {
+      const img = await readImg($('rbFile'));
+      await call('/panel/rolebutton', { channelId: $('rbChannel').value.trim(), roleId: $('rbRole').value.trim(), text: $('rbText').value, imageUrl: $('rbImage').value.trim(), ...img, buttonLabel: $('rbLabel').value.trim() });
+      setMsg('rbMsg', 'ok', '✓ ส่งเข้าห้องแล้ว');
+    } catch (e) { setMsg('rbMsg', 'bad', e.message); } finally { b.disabled = false; }
+  });
+  $('tkSend').addEventListener('click', async () => {
+    const b = $('tkSend'); b.disabled = true; setMsg('tkMsg', 'busy', 'กำลังส่ง…');
+    try {
+      const img = await readImg($('tkFile'));
+      await call('/panel/ticketpanel', { channelId: $('tkChannel').value.trim(), staffRoleId: $('tkRole').value.trim(), categoryId: $('tkCat').value.trim(), text: $('tkText').value, imageUrl: $('tkImage').value.trim(), ...img, buttonLabel: $('tkLabel').value.trim() });
+      setMsg('tkMsg', 'ok', '✓ ส่งเข้าห้องแล้ว');
+    } catch (e) { setMsg('tkMsg', 'bad', e.message); } finally { b.disabled = false; }
+  });
+
+  /* ---------- ร้านค้า ---------- */
+  let shopLoaded = false, products = [];
+  function fileToData(input) {
+    const f = input.files[0]; if (!f) return Promise.resolve(null);
+    if (f.size > 2 * 1024 * 1024) return Promise.reject(new Error('รูปใหญ่เกิน 2MB'));
+    return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(new Error('อ่านไฟล์ไม่ได้')); fr.readAsDataURL(f); });
+  }
+  async function loadShop() {
+    shopLoaded = true;
+    $('pList').innerHTML = '<div class="skel" style="border-radius:12px"></div>';
+    try {
+      const d = await call('/panel/shop/get', {}); const s = d.settings || {};
+      $('shName').value = s.shopName || ''; $('shNote').value = s.shopNote || '';
+      $('shPayNum').value = s.payNumber || ''; $('shPayName').value = s.payName || ''; $('shChannel').value = s.adminChannelId || '';
+      products = d.products || [];
+      $('pCount').textContent = products.length + ' รายการ';
+      $('pList').innerHTML = products.map((p) => '<div class="it">' +
+        (p.image ? '<img src="' + esc(p.image) + '" alt="" loading="lazy">' : '<span class="ph0">🛍</span>') +
+        '<div class="nm"><b>' + esc(p.name) + (p.active === false ? '<span class="tag r">ปิดขาย</span>' : '') + '</b><span>' +
+        [p.price30 ? '30 วัน ฿' + p.price30 : '', p.price90 ? '90 วัน ฿' + p.price90 : ''].filter(Boolean).join(' · ') + '</span></div>' +
+        '<button class="btn sm" data-ed="' + esc(p.id) + '">แก้</button><button class="btn sm danger" data-del="' + esc(p.id) + '">ลบ</button></div>').join('')
+        || '<div class="empty" style="padding:24px">ยังไม่มีสินค้า</div>';
+    } catch (e) { $('pList').innerHTML = ''; setMsg('pMsg2', 'bad', e.message); }
+  }
+  $('shSaveSettings').addEventListener('click', async () => {
+    const b = $('shSaveSettings'); b.disabled = true; setMsg('shSetMsg', 'busy', 'กำลังบันทึก…');
+    try {
+      const qr = await fileToData($('shQr'));
+      await call('/panel/shop/settings', { shopName: $('shName').value.trim(), shopNote: $('shNote').value.trim(), payNumber: $('shPayNum').value.trim(), payName: $('shPayName').value.trim(), adminChannelId: $('shChannel').value.trim(), ...(qr ? { payQr: qr } : {}) });
+      setMsg('shSetMsg', 'ok', '✓ บันทึกแล้ว');
+    } catch (e) { setMsg('shSetMsg', 'bad', e.message); } finally { b.disabled = false; }
+  });
+  function clearProd() { $('pId').value = ''; $('pName').value = ''; $('pDesc').value = ''; $('pPrice30').value = '0'; $('pPrice90').value = '0'; $('pImg').value = ''; $('pRole').value = '1529344448817791016'; $('pFormTitle').textContent = 'เพิ่มสินค้า'; }
+  $('pSave').addEventListener('click', async () => {
+    const b = $('pSave'); b.disabled = true; setMsg('pMsg2', 'busy', 'กำลังบันทึก…');
+    try {
+      const img = await fileToData($('pImg'));
+      await call('/panel/shop/product', { id: $('pId').value, name: $('pName').value.trim(), desc: $('pDesc').value, price30: $('pPrice30').value, price90: $('pPrice90').value, roleId: $('pRole').value.trim(), ...(img !== null ? { image: img } : {}) });
+      setMsg('pMsg2', 'ok', '✓ บันทึกสินค้าแล้ว'); clearProd(); loadShop();
+    } catch (e) { setMsg('pMsg2', 'bad', e.message); } finally { b.disabled = false; }
+  });
+  $('pClear').addEventListener('click', clearProd);
+  $('pList').addEventListener('click', async (e) => {
+    const ed = e.target.dataset.ed, del = e.target.dataset.del;
+    if (ed) { const p = products.find((x) => x.id === ed); if (p) { $('pId').value = p.id; $('pName').value = p.name; $('pDesc').value = p.desc || ''; $('pPrice30').value = p.price30 || 0; $('pPrice90').value = p.price90 || 0; $('pRole').value = p.roleId || ''; $('pFormTitle').textContent = 'แก้สินค้า: ' + p.name; $('pName').focus(); window.scrollTo({ top: 0, behavior: 'smooth' }); } }
+    if (del && confirm('ลบสินค้านี้?')) { try { await call('/panel/shop/delproduct', { id: del }); toast('ลบสินค้าแล้ว'); loadShop(); } catch (err) { toast(err.message, false); } }
+  });
+
+  /* ---------- แมพ ---------- */
+  let mapsLoaded = false, mapsData = { maps: [], buyDiscordChannel: '', buyDiscordGuild: '' };
+  async function loadMaps() {
+    mapsLoaded = true;
+    try { const d = await call('/api/maps', {}); mapsData = d; $('mapDiscordGuild').value = d.buyDiscordGuild || ''; $('mapDiscordCh').value = d.buyDiscordChannel || ''; renderMapList(); }
+    catch (e) { setMsg('mpMsg', 'bad', e.message); }
+  }
+  function renderMapList() {
+    $('mapList').innerHTML = (mapsData.maps || []).map((m) => '<div class="it">' +
+      '<span class="ph0">' + esc(m.emoji || '🗺') + '</span>' +
+      '<div class="nm"><b>' + esc(m.name) + (m.isNew ? '<span class="tag p">NEW</span>' : '') + '</b><span>' + esc(m.price || 'ไม่มีราคา') + (m.role ? ' · ยศ ' + esc(m.role) : '') + ' · ' + esc(m.id) + '</span></div>' +
+      '<button class="btn sm" data-medit="' + esc(m.id) + '">แก้</button><button class="btn sm danger" data-mdel="' + esc(m.id) + '">ลบ</button></div>').join('')
+      || '<div class="empty" style="padding:24px">ยังไม่มีแมพ</div>';
+  }
+  $('mapList').addEventListener('click', async (e) => {
+    const ed = e.target.dataset.medit, del = e.target.dataset.mdel;
+    if (ed) { const m = (mapsData.maps || []).find((x) => x.id === ed); if (m) { $('mpId').value = m.id; $('mpId').disabled = true; $('mpName').value = m.name || ''; $('mpPrice').value = m.price || ''; $('mpImg').value = m.img || ''; $('mpEmoji').value = m.emoji || ''; $('mpRole').value = m.role || ''; $('mpNew').checked = !!m.isNew; $('mpEditId').value = m.id; $('mpFormTitle').textContent = 'แก้แมพ: ' + (m.name || m.id); $('mpName').focus(); } }
+    if (del && confirm('ลบแมพนี้?')) { try { await call('/api/maps/delete', { id: del }); toast('ลบแมพแล้ว'); loadMaps(); } catch (err) { setMsg('mpMsg', 'bad', err.message); } }
+  });
+  $('mpSave').addEventListener('click', async () => {
+    const id = $('mpEditId').value || $('mpId').value.trim();
+    if (!id) return setMsg('mpMsg', 'bad', 'ต้องใส่ ID แมพ');
+    const map = { name: $('mpName').value.trim(), price: $('mpPrice').value.trim(), img: $('mpImg').value.trim(), emoji: $('mpEmoji').value.trim(), role: $('mpRole').value.trim(), isNew: $('mpNew').checked, overlays: [], downloads: [], commands: [] };
+    const old = (mapsData.maps || []).find((m) => m.id === id);   // แก้ = เก็บ overlay/ดาวน์โหลด/คำสั่งเดิมไว้
+    if (old) { map.overlays = old.overlays || []; map.downloads = old.downloads || []; map.commands = old.commands || []; }
+    try { await call('/api/maps/save', { id, map }); setMsg('mpMsg', 'ok', '✓ บันทึกแล้ว'); clearMapForm(); loadMaps(); }
+    catch (e) { setMsg('mpMsg', 'bad', e.message); }
+  });
+  function clearMapForm() { $('mpId').value = ''; $('mpId').disabled = false; $('mpName').value = ''; $('mpPrice').value = ''; $('mpImg').value = ''; $('mpEmoji').value = ''; $('mpRole').value = ''; $('mpNew').checked = false; $('mpEditId').value = ''; $('mpFormTitle').textContent = 'เพิ่มแมพ'; }
+  $('mpClear').addEventListener('click', clearMapForm);
+  async function saveBuy() {
+    try {
+      mapsData.buyDiscordGuild = $('mapDiscordGuild').value.trim(); mapsData.buyDiscordChannel = $('mapDiscordCh').value.trim();
+      await call('/api/maps', { maps: mapsData.maps, buyDiscordGuild: mapsData.buyDiscordGuild, buyDiscordChannel: mapsData.buyDiscordChannel });
+      setMsg('mapBuyMsg', 'ok', '✓ บันทึกปุ่ม BUY แล้ว');
+    } catch (e) { setMsg('mapBuyMsg', 'bad', e.message); }
+  }
+  $('mapDiscordCh').addEventListener('change', saveBuy);
+  $('mapDiscordGuild').addEventListener('change', saveBuy);
+
+  /* ---------- เข้าสู่ระบบ ---------- */
+  $('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const typed = $('key').value.trim();
+    if (!typed) { $('lmsg').textContent = 'ใส่รหัสแอดมินก่อน'; return; }
+    KEY = typed;
+    const b = $('enter'); b.disabled = true; b.innerHTML = '<span class="spin"></span> กำลังเข้า…';
+    try {
+      // ขอรายชื่อครั้งเดียว = เช็ครหัส + ได้ข้อมูลไปแสดงเลย (ไม่ต้องยิงซ้ำ)
+      const d = await call('/panel/members', {});
+      $('login').classList.add('hidden'); $('panel').classList.remove('hidden');
+      members = d.members || [];
+      if (d.warning) { $('warn').textContent = '⚠️ ' + d.warning; $('warn').classList.remove('hidden'); }
+      render();
+      $('syncTxt').textContent = 'อัปเดต ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      // รีเฟรชเงียบ ๆ ทุก 60 วิ (เฉพาะตอนแท็บเปิดอยู่และไม่ได้เปิดลิ้นชัก)
+      setInterval(() => { if (!cur && !document.hidden && $('panel').querySelector('.pane.on').dataset.pane === 'members') load(false, true); }, 60000);
+    } catch (err) { $('lmsg').textContent = err.message; KEY = ''; }
+    finally { b.disabled = false; b.textContent = 'เข้าสู่ระบบ'; }
+  });
+  $('logout').addEventListener('click', () => location.reload());
+})();
+</script></body></html>
