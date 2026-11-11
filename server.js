@@ -1276,10 +1276,23 @@ async function handleAuth(req, res, url, cors) {
       });
       if (!tokRes.ok) throw new Error('token exchange failed');
       const tok = await tokRes.json();
-      const check = await checkDiscordMember(tok.access_token);
+      let check = await checkDiscordMember(tok.access_token);
 
-      // ดิสที่สอง: มียศ role2Id = สิทธิ์ถาวรทุกอย่าง — ข้ามเช็ควันหมดอายุทั้งหมด
+      // ไม่อยู่ดิสหลัก / ไม่มียศในดิสหลัก — ยังต้องรู้ uid เพื่อเช็คสิทธิ์ถาวรในดิสที่สอง
+      if (!check.uid) {
+        try {
+          const me = await fetch(`${DC_BASE}/users/@me`, { headers: { Authorization: `Bearer ${tok.access_token}` } }).then((r) => (r.ok ? r.json() : null));
+          if (me?.id) {
+            check = { ...check, uid: me.id, name: check.name || me.global_name || me.username || 'สมาชิก',
+              avatar: me.avatar ? `https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png?size=64` : '' };
+          }
+        } catch { /* ไม่รู้ uid = ไม่มีสิทธิ์ถาวร */ }
+      }
+
+      // ดิสที่สอง: มียศ role2Id = สิทธิ์ถาวรทุกอย่าง (ล็อกอิน + ทุกหน้า + ทุกเกม) — ข้ามเช็ควันหมดอายุทั้งหมด
       const permanent = check.uid ? await botCheckGuild2(check.uid) : false;
+      // มีสิทธิ์ถาวรแต่ไม่มียศในดิสหลัก (หรือไม่อยู่ดิสหลัก) ก็ล็อกอินได้
+      if (permanent && !check.ok) check = { ...check, ok: true, roles: check.roles || [] };
 
       // เช็ควันหมดอายุจากคลัง (แอดมินตั้งไว้ในเว็บ) — หมดอายุแล้วเข้าไม่ได้แม้มียศ (ยกเว้นสิทธิ์ถาวรจากดิสที่สอง)
       const accessRec = STORE_ENABLED ? await getAccess(check.uid) : null;
@@ -1305,15 +1318,15 @@ async function handleAuth(req, res, url, cors) {
         };
         // สิทธิ์ถาวรจากดิสที่สอง => ผ่านประตู + ปลดล็อกทุกหน้า/ทุกแมพ ข้ามเช็ควันหมดอายุทุกยศ
         const mooniOk = (!!check.mooni && !roleExpired(D.roleId)) || permanent;
-        const mcOk = !!check.mc && !roleExpired(D.mcRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
+        const mcOk = (!!check.mc && !roleExpired(D.mcRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
         const primeOk = (!!check.prime && !roleExpired(D.primeRoleId)) || permanent;
-        const candyOk = !!check.candy && !roleExpired(D.candyRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
-        const farmerOk = !!check.farmer && !roleExpired(D.farmerRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
-        const diamondOk = !!check.diamond && !roleExpired(D.diamondRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
-        const parkourOk = !!check.parkour && !roleExpired(D.parkourRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
-        const parkourv2Ok = !!check.parkourv2 && !roleExpired(D.parkourv2RoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
-        const speedrunOk = !!check.speedrun && !roleExpired(D.speedrunRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
-        const game3dOk = !!check.game3d && !roleExpired(D.game3dRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
+        const candyOk = (!!check.candy && !roleExpired(D.candyRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
+        const farmerOk = (!!check.farmer && !roleExpired(D.farmerRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
+        const diamondOk = (!!check.diamond && !roleExpired(D.diamondRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
+        const parkourOk = (!!check.parkour && !roleExpired(D.parkourRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
+        const parkourv2Ok = (!!check.parkourv2 && !roleExpired(D.parkourv2RoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
+        const speedrunOk = (!!check.speedrun && !roleExpired(D.speedrunRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
+        const game3dOk = (!!check.game3d && !roleExpired(D.game3dRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
         // ส่งวันหมดอายุของแต่ละยศกลับไปด้วย — แอปเอาไปโชว์บนการ์ดแมพ (เหลืออีกกี่วัน)
         const roleExp = roleExpOf(check.uid, D, roleExpMap);
         const token = signSession({ uid: check.uid, name: check.name, prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, parkour: parkourOk, parkourv2: parkourv2Ok, speedrun: speedrunOk, game3d: game3dOk, mooni: mooniOk, exp });
@@ -1372,15 +1385,15 @@ async function handleAuth(req, res, url, cors) {
     };
     // สิทธิ์ถาวรจากดิสที่สอง => ผ่าน + ปลดล็อกทุกหน้า/ทุกแมพ ข้ามเช็ควันหมดอายุทุกยศ
     const mooniOk = (!!chk.mooni && !roleExpired(D.roleId)) || permanent;
-    const mcOk = !!chk.mc && !roleExpired(D.mcRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
+    const mcOk = (!!chk.mc && !roleExpired(D.mcRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
     const primeOk = (!!chk.prime && !roleExpired(D.primeRoleId)) || permanent;
-    const candyOk = !!chk.candy && !roleExpired(D.candyRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
-    const farmerOk = !!chk.farmer && !roleExpired(D.farmerRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
-    const diamondOk = !!chk.diamond && !roleExpired(D.diamondRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
-    const parkourOk = !!chk.parkour && !roleExpired(D.parkourRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
-    const parkourv2Ok = !!chk.parkourv2 && !roleExpired(D.parkourv2RoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
-    const speedrunOk = !!chk.speedrun && !roleExpired(D.speedrunRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
-    const game3dOk = !!chk.game3d && !roleExpired(D.game3dRoleId);   // ยศเกม: ต้องมียศนี้เอง ยศอื่น/สิทธิ์ถาวรไม่ปลดล็อก
+    const candyOk = (!!chk.candy && !roleExpired(D.candyRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
+    const farmerOk = (!!chk.farmer && !roleExpired(D.farmerRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
+    const diamondOk = (!!chk.diamond && !roleExpired(D.diamondRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
+    const parkourOk = (!!chk.parkour && !roleExpired(D.parkourRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
+    const parkourv2Ok = (!!chk.parkourv2 && !roleExpired(D.parkourv2RoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
+    const speedrunOk = (!!chk.speedrun && !roleExpired(D.speedrunRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
+    const game3dOk = (!!chk.game3d && !roleExpired(D.game3dRoleId)) || permanent;   // ยศเกมของมันเอง หรือสิทธิ์ถาวร (ดิสที่สอง) — ยศแอปอื่นไม่ปลดล็อก
     // ยังใช้แอปได้ถ้ายังมียศ Mooni / Minecraft / GAME 3D อย่างใดอย่างหนึ่ง
     const valid = (mooniOk || mcOk || game3dOk) && timeOk;
     const reason = (!mooniOk && !mcOk && !game3dOk) ? 'no_role' : !timeOk ? 'expired' : '';
