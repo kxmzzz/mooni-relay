@@ -78,6 +78,7 @@ const D = {
   parkourRoleId: envOf('DISCORD_PARKOUR_ROLE_ID', { digits: true }) || '1550867888531968170',
   parkourv2RoleId: envOf('DISCORD_PARKOURV2_ROLE_ID', { digits: true }) || '1556990934401683507',   // ยศ Parkour V2 (ปลดล็อกการ์ด Parkour V2)
   speedrunRoleId: envOf('DISCORD_SPEEDRUN_ROLE_ID', { digits: true }) || '1551020999070322698',   // ยศ Diamond Speedrun (ปลดล็อกการ์ด Diamond Speedrun)   // ยศ Parkour (ปลดล็อกการ์ด Parkour V1 ในหน้า Minecraft)
+  game3dRoleId: envOf('DISCORD_GAME3D_ROLE_ID', { digits: true }) || '1569928515179257866',   // ยศ GAME 3D (ปลดล็อกหน้า GAME 3D — เกมร้านข้าวตามสั่ง)
   botToken: envOf('DISCORD_BOT_TOKEN', { token: true }),          // โทเคนบอท — ใช้เช็คยศสดแบบเรียลไทม์ (ถอดยศแล้วรู้ทันที)
   /* ดิสที่สอง (เช็คด้วยบอท) — มียศนี้ในดิสที่สอง = เข้าแอปได้ถาวร ปลดล็อกทุกหน้า/ทุกแมพ ข้ามเช็ควันหมดอายุ */
   guild2Id: envOf('DISCORD_GUILD2_ID', { digits: true }) || '1549377539431206962',
@@ -325,7 +326,7 @@ async function botSetRole(uid, roleId, on) {
 function patchCachedMemberRole(uid, roleId, on) {
   const e = dcCache.get('members:all');
   if (!e || !e.v || !Array.isArray(e.v.members)) return;
-  const flagOf = { [D.roleId]: 'mooni', [D.primeRoleId]: 'prime', [D.mcRoleId]: 'mc', [D.candyRoleId]: 'candy', [D.farmerRoleId]: 'farmer', [D.diamondRoleId]: 'diamond', [D.parkourRoleId]: 'parkour', [D.parkourv2RoleId]: 'parkourv2', [D.speedrunRoleId]: 'speedrun' };
+  const flagOf = { [D.roleId]: 'mooni', [D.primeRoleId]: 'prime', [D.mcRoleId]: 'mc', [D.candyRoleId]: 'candy', [D.farmerRoleId]: 'farmer', [D.diamondRoleId]: 'diamond', [D.parkourRoleId]: 'parkour', [D.parkourv2RoleId]: 'parkourv2', [D.speedrunRoleId]: 'speedrun', [D.game3dRoleId]: 'game3d' };
   const flag = flagOf[roleId];
   const m = e.v.members.find((x) => x.uid === String(uid));
   if (flag && m) m[flag] = !!on;
@@ -361,6 +362,7 @@ async function botListMembers() {
       parkour: D.parkourRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.parkourRoleId)) : false,
       parkourv2: D.parkourv2RoleId ? (Array.isArray(m.roles) && m.roles.includes(D.parkourv2RoleId)) : false,
       speedrun: D.speedrunRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.speedrunRoleId)) : false,
+      game3d: D.game3dRoleId ? (Array.isArray(m.roles) && m.roles.includes(D.game3dRoleId)) : false,
     })) };
   return cacheSet('members:all', out, 60000);
 }
@@ -376,6 +378,7 @@ function panelMember(m, maps) {
     mcExp: ex(D.mcRoleId), mooniExp: ex(D.roleId), primeExp: ex(D.primeRoleId),
     candyExp: ex(D.candyRoleId), farmerExp: ex(D.farmerRoleId), diamondExp: ex(D.diamondRoleId),
     parkourExp: ex(D.parkourRoleId), parkourv2Exp: ex(D.parkourv2RoleId), speedrunExp: ex(D.speedrunRoleId),
+    game3dExp: ex(D.game3dRoleId),
     active: (Date.now() - (lastSeen.get(m.uid) || 0)) < ACTIVE_WINDOW,
   };
 }
@@ -854,6 +857,7 @@ function roleExpOf(uid, D, roleExpMap) {
     parkour: roleExpMap[`${uid}:${D.parkourRoleId}`] || 0,
     parkourv2: roleExpMap[`${uid}:${D.parkourv2RoleId}`] || 0,
     speedrun: roleExpMap[`${uid}:${D.speedrunRoleId}`] || 0,
+    game3d: roleExpMap[`${uid}:${D.game3dRoleId}`] || 0,
   };
 }
 
@@ -1107,10 +1111,11 @@ async function checkDiscordMember(accessToken) {
   const parkour = D.parkourRoleId ? roles.includes(D.parkourRoleId) : false;   // ยศ Parkour (ปลดล็อกการ์ด Parkour V1)
   const parkourv2 = D.parkourv2RoleId ? roles.includes(D.parkourv2RoleId) : false;   // ยศ Parkour V2 (ปลดล็อกการ์ด Parkour V2)
   const speedrun = D.speedrunRoleId ? roles.includes(D.speedrunRoleId) : false;   // ยศ Diamond Speedrun (ปลดล็อกการ์ด Diamond Speedrun)
+  const game3d = D.game3dRoleId ? roles.includes(D.game3dRoleId) : false;   // ยศ GAME 3D (ปลดล็อกหน้า GAME 3D)
   const mooni = roles.includes(D.roleId);                        // ยศ Mooni (เข้าแอปได้เต็มทุกหน้า)
-  // เข้าแอปได้ถ้ามียศ Mooni "หรือ" ยศ Minecraft — คนที่มีแค่ mc จะเข้าได้เฉพาะหน้า Minecraft
-  const allowed = mooni || mc;
-  return allowed ? { ok: true, name, uid, avatar, prime, mc, candy, farmer, diamond, parkour, parkourv2, speedrun, mooni, roles } : { ok: false, reason: 'no_role', name, uid };
+  // เข้าแอปได้ถ้ามียศ Mooni "หรือ" ยศ Minecraft "หรือ" ยศ GAME 3D — คนที่ไม่มียศ Mooni เข้าได้เฉพาะหน้าที่มียศ
+  const allowed = mooni || mc || game3d;
+  return allowed ? { ok: true, name, uid, avatar, prime, mc, candy, farmer, diamond, parkour, parkourv2, speedrun, game3d, mooni, roles } : { ok: false, reason: 'no_role', name, uid };
 }
 
 /** ใช้บอทเช็คยศปัจจุบันของสมาชิก (เรียลไทม์ — ถอดยศแล้วรู้เลย) */
@@ -1139,6 +1144,7 @@ async function botCheckMember(uid) {
         parkour: D.parkourRoleId ? roles.includes(D.parkourRoleId) : false,
         parkourv2: D.parkourv2RoleId ? roles.includes(D.parkourv2RoleId) : false,
         speedrun: D.speedrunRoleId ? roles.includes(D.speedrunRoleId) : false,
+        game3d: D.game3dRoleId ? roles.includes(D.game3dRoleId) : false,
         name: m.nick || m.user?.global_name || m.user?.username || '',
         roles,
       };
@@ -1291,10 +1297,11 @@ async function handleAuth(req, res, url, cors) {
         const parkourOk = (!!check.parkour && !roleExpired(D.parkourRoleId)) || permanent;
         const parkourv2Ok = (!!check.parkourv2 && !roleExpired(D.parkourv2RoleId)) || permanent;
         const speedrunOk = (!!check.speedrun && !roleExpired(D.speedrunRoleId)) || permanent;
+        const game3dOk = (!!check.game3d && !roleExpired(D.game3dRoleId)) || permanent;
         // ส่งวันหมดอายุของแต่ละยศกลับไปด้วย — แอปเอาไปโชว์บนการ์ดแมพ (เหลืออีกกี่วัน)
         const roleExp = roleExpOf(check.uid, D, roleExpMap);
-        const token = signSession({ uid: check.uid, name: check.name, prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, parkour: parkourOk, parkourv2: parkourv2Ok, speedrun: speedrunOk, mooni: mooniOk, exp });
-        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, avatar: check.avatar || '', prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, parkour: parkourOk, parkourv2: parkourv2Ok, speedrun: speedrunOk, mooni: mooniOk, accessExp, token, exp, roleExp, at: Date.now(), roles: check.roles || [] });
+        const token = signSession({ uid: check.uid, name: check.name, prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, parkour: parkourOk, parkourv2: parkourv2Ok, speedrun: speedrunOk, game3d: game3dOk, mooni: mooniOk, exp });
+        authResults.set(pair, { status: 'ok', name: check.name, uid: check.uid, avatar: check.avatar || '', prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, parkour: parkourOk, parkourv2: parkourv2Ok, speedrun: speedrunOk, game3d: game3dOk, mooni: mooniOk, accessExp, token, exp, roleExp, at: Date.now(), roles: check.roles || [] });
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(resultPage(true, `ยินดีต้อนรับ ${check.name}!`, 'ล็อกอินสำเร็จ กลับไปที่แอป Mooni ได้เลย — หน้าต่างนี้ปิดได้'));
       } else {
@@ -1330,12 +1337,12 @@ async function handleAuth(req, res, url, cors) {
 
     // ไม่ได้ตั้งบอท => เช็คยศสดไม่ได้ แต่ยังเช็ควันหมดอายุได้
     if (!D.botToken) {
-      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, candy: !!payload.candy, farmer: !!payload.farmer, diamond: !!payload.diamond, parkour: !!payload.parkour, parkourv2: !!payload.parkourv2, speedrun: !!payload.speedrun, mooni: !!payload.mooni, accessExp, reason: timeOk ? '' : 'expired', live: false, roleExp: {}, roles: [] });
+      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, candy: !!payload.candy, farmer: !!payload.farmer, diamond: !!payload.diamond, parkour: !!payload.parkour, parkourv2: !!payload.parkourv2, speedrun: !!payload.speedrun, game3d: !!payload.game3d, mooni: !!payload.mooni, accessExp, reason: timeOk ? '' : 'expired', live: false, roleExp: {}, roles: [] });
       return true;
     }
     const chk = await botCheckMember(uid);
     if (chk.error) {   // Discord ล่ม อย่าเพิ่งเตะออก
-      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, candy: !!payload.candy, farmer: !!payload.farmer, diamond: !!payload.diamond, parkour: !!payload.parkour, parkourv2: !!payload.parkourv2, speedrun: !!payload.speedrun, mooni: !!payload.mooni, accessExp, reason: timeOk ? '' : 'expired', live: false, roleExp: {}, roles: [] });
+      json(200, { valid: timeOk, prime: !!payload.prime, mc: !!payload.mc, candy: !!payload.candy, farmer: !!payload.farmer, diamond: !!payload.diamond, parkour: !!payload.parkour, parkourv2: !!payload.parkourv2, speedrun: !!payload.speedrun, game3d: !!payload.game3d, mooni: !!payload.mooni, accessExp, reason: timeOk ? '' : 'expired', live: false, roleExp: {}, roles: [] });
       return true;
     }
     // เช็ควันหมดอายุของแต่ละยศ — หมดอายุแล้วถือว่าไม่มียศ
@@ -1357,10 +1364,11 @@ async function handleAuth(req, res, url, cors) {
     const parkourOk = (!!chk.parkour && !roleExpired(D.parkourRoleId)) || permanent;
     const parkourv2Ok = (!!chk.parkourv2 && !roleExpired(D.parkourv2RoleId)) || permanent;
     const speedrunOk = (!!chk.speedrun && !roleExpired(D.speedrunRoleId)) || permanent;
-    // ยังใช้แอปได้ถ้ายังมียศ Mooni หรือยศ Minecraft อย่างใดอย่างหนึ่ง
-    const valid = (mooniOk || mcOk) && timeOk;
-    const reason = (!mooniOk && !mcOk) ? 'no_role' : !timeOk ? 'expired' : '';
-    json(200, { valid, prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, parkour: parkourOk, parkourv2: parkourv2Ok, speedrun: speedrunOk, mooni: mooniOk, accessExp, name: chk.name, live: true, reason, roleExp: roleExpOf(uid, D, roleExpMap), roles: chk.roles || [] });
+    const game3dOk = (!!chk.game3d && !roleExpired(D.game3dRoleId)) || permanent;
+    // ยังใช้แอปได้ถ้ายังมียศ Mooni / Minecraft / GAME 3D อย่างใดอย่างหนึ่ง
+    const valid = (mooniOk || mcOk || game3dOk) && timeOk;
+    const reason = (!mooniOk && !mcOk && !game3dOk) ? 'no_role' : !timeOk ? 'expired' : '';
+    json(200, { valid, prime: primeOk, mc: mcOk, candy: candyOk, farmer: farmerOk, diamond: diamondOk, parkour: parkourOk, parkourv2: parkourv2Ok, speedrun: speedrunOk, game3d: game3dOk, mooni: mooniOk, accessExp, name: chk.name, live: true, reason, roleExp: roleExpOf(uid, D, roleExpMap), roles: chk.roles || [] });
     return true;
   }
 
@@ -1370,7 +1378,7 @@ async function handleAuth(req, res, url, cors) {
     const rec = authResults.get(pair);
     if (!rec) { json(200, { status: 'unknown' }); return true; }
     if (rec.status === 'ok') {
-      json(200, { status: 'ok', name: rec.name, uid: rec.uid, avatar: rec.avatar || '', prime: !!rec.prime, mc: !!rec.mc, candy: !!rec.candy, farmer: !!rec.farmer, diamond: !!rec.diamond, parkour: !!rec.parkour, parkourv2: !!rec.parkourv2, speedrun: !!rec.speedrun, mooni: !!rec.mooni, accessExp: rec.accessExp || 0, token: rec.token, exp: rec.exp, roleExp: rec.roleExp || {}, roles: rec.roles || [] });
+      json(200, { status: 'ok', name: rec.name, uid: rec.uid, avatar: rec.avatar || '', prime: !!rec.prime, mc: !!rec.mc, candy: !!rec.candy, farmer: !!rec.farmer, diamond: !!rec.diamond, parkour: !!rec.parkour, parkourv2: !!rec.parkourv2, speedrun: !!rec.speedrun, game3d: !!rec.game3d, mooni: !!rec.mooni, accessExp: rec.accessExp || 0, token: rec.token, exp: rec.exp, roleExp: rec.roleExp || {}, roles: rec.roles || [] });
       authResults.delete(pair);   // ใช้ครั้งเดียว
     } else if (rec.status === 'denied') {
       json(200, { status: 'denied', reason: rec.reason, name: rec.name });
@@ -1680,7 +1688,7 @@ async function handlePanel(pathname, data) {
     const canRoles = isAdmin || (bits & 268435456n) === 268435456n;
     const canChannels = isAdmin || (bits & 16n) === 16n;
     const myTop = gRoles.filter((r) => myRoles.includes(r.id)).reduce((m, r) => Math.max(m, r.position || 0), 0);
-    const managed = [['Mooni', D.roleId], ['Mooni Pro', D.primeRoleId], ['Minecraft', D.mcRoleId], ['Candy', D.candyRoleId], ['Farmer', D.farmerRoleId], ['Diamond', D.diamondRoleId], ['Parkour', D.parkourRoleId], ['Parkour V2', D.parkourv2RoleId], ['Speedrun', D.speedrunRoleId]].filter(([, id]) => id);
+    const managed = [['Mooni', D.roleId], ['Mooni Pro', D.primeRoleId], ['Minecraft', D.mcRoleId], ['Candy', D.candyRoleId], ['Farmer', D.farmerRoleId], ['Diamond', D.diamondRoleId], ['Parkour', D.parkourRoleId], ['Parkour V2', D.parkourv2RoleId], ['Speedrun', D.speedrunRoleId], ['GAME 3D', D.game3dRoleId]].filter(([, id]) => id);
     const notFound = managed.filter(([, id]) => !gRoles.some((r) => r.id === id)).map(([n]) => n);
     const under = managed.filter(([, id]) => { const r = gRoles.find((x) => x.id === id); return r && (r.position || 0) >= myTop; }).map(([n]) => n);
     add(rolesRes.ok && canRoles && canChannels && !under.length && !notFound.length, 'สิทธิ์บอท + ลำดับยศ',
@@ -1759,7 +1767,7 @@ async function handlePanel(pathname, data) {
   }
 
   if (pathname === '/panel/role') {
-    const roleId = data.role === 'prime' ? D.primeRoleId : data.role === 'mc' ? D.mcRoleId : data.role === 'candy' ? D.candyRoleId : data.role === 'farmer' ? D.farmerRoleId : data.role === 'diamond' ? D.diamondRoleId : data.role === 'parkour' ? D.parkourRoleId : data.role === 'parkourv2' ? D.parkourv2RoleId : data.role === 'speedrun' ? D.speedrunRoleId : D.roleId;
+    const roleId = data.role === 'prime' ? D.primeRoleId : data.role === 'mc' ? D.mcRoleId : data.role === 'candy' ? D.candyRoleId : data.role === 'farmer' ? D.farmerRoleId : data.role === 'diamond' ? D.diamondRoleId : data.role === 'parkour' ? D.parkourRoleId : data.role === 'parkourv2' ? D.parkourv2RoleId : data.role === 'speedrun' ? D.speedrunRoleId : data.role === 'game3d' ? D.game3dRoleId : D.roleId;
     if (!roleId) return { code: 400, body: { error: 'ยังไม่ได้ตั้งไอดียศนี้' } };
     const roleRes = await botSetRoleDetail(String(data.uid), roleId, !!data.on);
     const ok = roleRes.ok;
@@ -1780,7 +1788,7 @@ async function handlePanel(pathname, data) {
     if (!STORE_ENABLED) return { code: 400, body: { error: 'ยังไม่ได้ตั้ง Upstash' } };
     // หา roleId จาก role name หรือใช้ mcRoleId เดิม
     const roleParam = data.role || 'mc';
-    const roleIdMap = { mc: D.mcRoleId, mooni: D.roleId, prime: D.primeRoleId, candy: D.candyRoleId, farmer: D.farmerRoleId, diamond: D.diamondRoleId, parkour: D.parkourRoleId, parkourv2: D.parkourv2RoleId, speedrun: D.speedrunRoleId };
+    const roleIdMap = { mc: D.mcRoleId, mooni: D.roleId, prime: D.primeRoleId, candy: D.candyRoleId, farmer: D.farmerRoleId, diamond: D.diamondRoleId, parkour: D.parkourRoleId, parkourv2: D.parkourv2RoleId, speedrun: D.speedrunRoleId, game3d: D.game3dRoleId };
     const roleId = roleIdMap[roleParam];
     if (!roleId) return { code: 400, body: { error: 'ยังไม่ได้ตั้งไอดียศ ' + roleParam } };
     const uid = String(data.uid);
