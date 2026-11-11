@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const { WebSocketServer } = require('ws');
 const uplimit = require('./uplimit');   // บอท Uplimit Media (ต้อนรับ + Ticket) — เดิมรันเป็นโปรเจกต์แยก
+const { startRoleWatch, roleWatchStatus } = require('./role-watch');   // ฟังการเปลี่ยนยศแบบสด
 const { createTicketFlow, closeTicketFlow } = require('./uplimit/ticket-flow');
 const { requestTicketDiscord } = require('./uplimit/ticket-request');
 
@@ -297,7 +298,7 @@ function cacheGet(key) {
   const e = dcCache.get(key);
   return e && Date.now() - e.at < e.ttl ? e.v : null;
 }
-function cacheSet(key, v, ttl = 45000) {
+function cacheSet(key, v, ttl = 20000) {   // 20 วิ — ยศเปลี่ยนปกติรู้ทันทีจาก role-watch นี่คือสำรองตอน gateway หลุด
   if (dcCache.size > 4000) dcCache.clear();
   dcCache.set(key, { at: Date.now(), v, ttl });
   return v;
@@ -2029,7 +2030,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({
       ok: true, clients: wss.clients.size, authEnabled: AUTH_ENABLED,
-      bot: !!D.botToken, store: STORE_ENABLED, dcCalls,
+      bot: !!D.botToken, store: STORE_ENABLED, dcCalls, roleWatch: roleWatchStatus(),
       publicKey: !!D.publicKey, publicKeyLen: D.publicKey.length,
       muffinToken: !!M.botToken, muffinKey: !!M.publicKey, muffinKeyLen: M.publicKey.length,
       autoSlip: AUTO_SLIP, freeQr: FREE_QR_AVAILABLE, ocr: OCR_AVAILABLE,
@@ -2309,4 +2310,15 @@ server.listen(PORT, () => {
 
   // บอท Uplimit Media รันในโปรเซสเดียวกัน (ปิดตัวเองเงียบ ๆ ถ้าไม่ได้ตั้ง UPLIMIT_TOKEN)
   uplimit.startUplimit().catch((err) => console.error('[uplimit] เริ่มไม่สำเร็จ:', err.message));
+
+  // ยศเปลี่ยนในดิสหลัก/ดิสที่สอง → ล้างแคช + บอกแอปของคนนั้นให้เช็คใหม่ทันที (ไม่ต้องรอรอบ 30 วิ)
+  startRoleWatch({
+    token: D.botToken,
+    guildIds: [D.guildId, D.guild2Id],
+    onChange: (uid) => {
+      cacheDropUid(uid);
+      dcCache.delete('guild2:' + uid);
+      broadcast({ type: 'auth:changed', uid: String(uid) });
+    },
+  });
 });
