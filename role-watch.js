@@ -10,12 +10,16 @@ const { Client, Events, GatewayIntentBits } = require('discord.js');
 
 const state = { enabled: false, online: false, error: null, events: 0 };
 
-function startRoleWatch({ token, guildIds, onChange }) {
+function startRoleWatch({ token, guildIds, onChange, api }) {
   if (!token) { state.error = 'no-token'; return state; }
   const watched = new Set(guildIds.filter(Boolean));
   state.enabled = true;
 
-  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
+  // api = พร็อกซี่ดิสคอร์ด (DISCORD_API_BASE) — IP ของ Render โดนดิสคอร์ดบล็อก REST ตรง ๆ ได้
+  const client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+    ...(api ? { rest: { api } } : {}),
+  });
   const fire = (guildId, uid, why) => {
     if (!watched.has(guildId) || !uid) return;
     state.events++;

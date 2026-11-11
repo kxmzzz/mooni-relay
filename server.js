@@ -2314,6 +2314,7 @@ server.listen(PORT, () => {
   // ยศเปลี่ยนในดิสหลัก/ดิสที่สอง → ล้างแคช + บอกแอปของคนนั้นให้เช็คใหม่ทันที (ไม่ต้องรอรอบ 30 วิ)
   startRoleWatch({
     token: D.botToken,
+    api: DC_CUSTOM_BASE || undefined,   // ผ่านพร็อกซี่เดียวกับ REST อื่น ๆ (IP ของ Render โดนดิสคอร์ดบล็อกได้)
     guildIds: [D.guildId, D.guild2Id],
     onChange: (uid) => {
       cacheDropUid(uid);
@@ -2321,4 +2322,13 @@ server.listen(PORT, () => {
       broadcast({ type: 'auth:changed', uid: String(uid) });
     },
   });
+
+  // กันหลับ: Render แพ็กเกจฟรีพักเซิร์ฟเวอร์เมื่อไม่มีคนเข้า 15 นาที → บอททั้งหมดออฟไลน์
+  // ปิงตัวเองผ่าน URL สาธารณะทุก 10 นาที (นับเป็นทราฟฟิกขาเข้า) — ตั้ง KEEP_AWAKE=0 เพื่อปิด
+  if (/^https:\/\//.test(PUBLIC_URL) && envOf('KEEP_AWAKE') !== '0') {
+    setInterval(() => {
+      fetch(PUBLIC_URL + '/health', { signal: AbortSignal.timeout(20000) }).catch(() => {});
+    }, 10 * 60 * 1000);
+    console.log('[keep-awake] ปิงตัวเองทุก 10 นาที:', PUBLIC_URL);
+  }
 });

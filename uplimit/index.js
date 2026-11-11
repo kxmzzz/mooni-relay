@@ -21,9 +21,12 @@ async function startUplimit() {
   }
 
   state.enabled = true;
+  // ผ่านพร็อกซี่ดิสคอร์ดเดียวกับ relay (DISCORD_API_BASE) — ยิงตรงจาก IP ของ Render แล้วโดนบล็อก บอทเลยขึ้นออฟไลน์ค้าง
+  const api = String(process.env.DISCORD_API_BASE || '').trim().replace(/\/$/, '');
   client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
     partials: [Partials.Channel],
+    ...(api ? { rest: { api } } : {}),
   });
 
   client.once(Events.ClientReady, async (readyClient) => {
