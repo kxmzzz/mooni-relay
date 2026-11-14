@@ -7,7 +7,7 @@
  */
 const { Client, Events, GatewayIntentBits, Partials, MessageFlags } = require('discord.js');
 const config = require('./config');
-const { sendWelcome } = require('./welcome');
+const { sendWelcome, checkWelcome, welcomeStatus } = require('./welcome');
 const { panelCommand, handlePanelCommand, handleTicketButton } = require('./ticket');
 
 let client = null;
@@ -41,6 +41,19 @@ async function startUplimit() {
       console.log('[uplimit] ลงทะเบียนคำสั่ง /ticketpanel แล้ว');
     } catch (err) {
       console.error('[uplimit] ลงทะเบียนคำสั่งไม่สำเร็จ:', err.message);
+    }
+
+    // ตรวจห้องต้อนรับตั้งแต่ตอนออนไลน์ — ถ้าห้อง/สิทธิ์มีปัญหาจะเห็นใน log และ /health ทันที ไม่ต้องรอมีคนเข้า
+    const guild = readyClient.guilds.cache.get(config.guildId);
+    if (guild) {
+      const w = await checkWelcome(guild).catch((err) => ({ error: err }));
+      if (w.channel) {
+        console.log(`[uplimit] ห้องต้อนรับ: #${w.channel.name} (${w.source})`);
+      } else if (w.error) {
+        console.error('[uplimit] ตรวจห้องต้อนรับไม่สำเร็จ:', w.error.message);
+      }
+    } else {
+      console.warn(`[uplimit] ⚠️ บอทไม่ได้อยู่ในเซิร์ฟเวอร์ UPLIMIT_GUILD_ID=${config.guildId}`);
     }
   });
 
@@ -90,6 +103,6 @@ async function startUplimit() {
 }
 
 /** สถานะสำหรับแสดงใน /health (ไม่มีข้อมูลลับ) */
-const status = () => ({ ...state });
+const status = () => ({ ...state, welcome: welcomeStatus() });
 
 module.exports = { startUplimit, status };

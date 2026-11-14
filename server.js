@@ -1750,6 +1750,13 @@ async function handlePanel(pathname, data) {
       add(true, 'บอท Uplimit Media', 'ปิดอยู่ — ไม่ได้ตั้ง UPLIMIT_TOKEN / UPLIMIT_GUILD_ID');
     } else if (ul.online) {
       add(true, 'บอท Uplimit Media', 'ออนไลน์ ' + ul.tag + ' · ' + ul.guild);
+      const w = ul.welcome || {};
+      const wOk = w.source === 'configured' && !(w.missingPerms || []).length;
+      add(wOk, 'Uplimit ห้องต้อนรับ', !w.channelId
+        ? ('ใช้ไม่ได้: ' + (w.problem || 'ไม่พบห้อง'))
+        : ('#' + w.channelName + (w.source === 'system' ? ' (ห้องระบบ — ' + w.problem + ')' : ''))
+          + ((w.missingPerms || []).length ? ' · ขาดสิทธิ์: ' + w.missingPerms.join(', ') : '')
+          + (w.lastError ? ' · ล่าสุดส่งไม่ผ่าน: ' + w.lastError.error : ''));
     } else {
       add(false, 'บอท Uplimit Media', 'ต่อไม่ติด: ' + (ul.error || 'ยังไม่ล็อกอิน')
         + ' — ตรวจ UPLIMIT_TOKEN กับ SERVER MEMBERS INTENT ของแอป Uplimit');
